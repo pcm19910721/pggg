@@ -144,34 +144,35 @@ if command -v gbrain >/dev/null 2>&1 && gbrain --version >/dev/null 2>&1; then
     else
       GBRAIN_PAGES="0"
     fi
-    GBRAIN_CORE_PRESENT="1"
-    for core_slug in \
-      "project/$PROJECT_ID/overview" \
-      "project/$PROJECT_ID/state" \
-      "project/$PROJECT_ID/foundation-readiness" \
-      "project/$PROJECT_ID/code-context" \
-      "project/$PROJECT_ID/quality-gates"
-    do
-      if ! printf '%s\n' "$GBRAIN_LIST_OUTPUT" | grep -Fq "$core_slug"; then
-        GBRAIN_CORE_PRESENT="0"
-        GBRAIN_CORE_MISSING="${GBRAIN_CORE_MISSING}${GBRAIN_CORE_MISSING:+,}$core_slug"
-      fi
-    done
-    if [ "$GBRAIN_PAGES" != "0" ] && [ "$GBRAIN_CORE_PRESENT" = "1" ]; then
-      GBRAIN_STATUS="ready"
-    fi
   else
     GBRAIN_PAGES="unknown"
     GBRAIN_STATUS="empty"
   fi
 
-  if GBRAIN_QUERY_OUTPUT="$(timeout 8s gbrain query "project $PROJECT_ID harness readiness" --no-expand 2>&1)"; then
+  GBRAIN_CORE_PRESENT="1"
+  for core_slug in \
+    "project/$PROJECT_ID/overview" \
+    "project/$PROJECT_ID/state" \
+    "project/$PROJECT_ID/foundation-readiness" \
+    "project/$PROJECT_ID/code-context" \
+    "project/$PROJECT_ID/quality-gates"
+  do
+    if ! timeout 8s gbrain get "$core_slug" >/dev/null 2>&1; then
+      GBRAIN_CORE_PRESENT="0"
+      GBRAIN_CORE_MISSING="${GBRAIN_CORE_MISSING}${GBRAIN_CORE_MISSING:+,}$core_slug"
+    fi
+  done
+  if [ "$GBRAIN_PAGES" != "0" ] && [ "$GBRAIN_PAGES" != "unknown" ] && [ "$GBRAIN_CORE_PRESENT" = "1" ]; then
+    GBRAIN_STATUS="ready"
+  fi
+
+  if GBRAIN_QUERY_OUTPUT="$(timeout 20s gbrain query "gbrain healthcheck project memory" --no-expand --limit 1 2>&1)"; then
     if [ "$GBRAIN_STATUS" = "ready" ]; then
       GBRAIN_QUERY_STATUS="ready"
-      GBRAIN_QUERY_EVIDENCE="query completed"
+      GBRAIN_QUERY_EVIDENCE="health query completed"
     else
       GBRAIN_QUERY_STATUS="empty"
-      GBRAIN_QUERY_EVIDENCE="query command completed but core project pages are missing"
+      GBRAIN_QUERY_EVIDENCE="health query completed but core project pages are missing"
     fi
   else
     GBRAIN_QUERY_RC="$?"
@@ -392,8 +393,8 @@ let verdict = 'ready';
 if (blockers.length) verdict = 'blocked';
 else if (warnings.includes('gbrain_empty') || warnings.includes('runtime_missing') || warnings.includes('not_git_repo')) verdict = 'partial';
 
-let nextAgent = state.next_recommended_agent || 'Orchestrator';
-let nextRecipe = state.next_recommended_recipe || 'R0 Restore / Resume Context';
+let nextAgent = 'Orchestrator';
+let nextRecipe = 'R0 Restore / Resume Context';
 const remediableWarnings = new Set(['gbrain_empty', 'gbrain_core_pages_missing', 'runtime_missing', 'browse_missing']);
 const needsFoundationRemediation = verdict === 'blocked' || warnings.some((warning) => remediableWarnings.has(warning));
 if (needsFoundationRemediation) {

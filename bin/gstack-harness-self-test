@@ -336,19 +336,20 @@ NODE
   assert_contains "$PRESERVE_DIR/docs/SYSTEM_TUNING_REPORT.md" "REAL TUNING REPORT"
   assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Phase: maintenance"
   assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Last completed agent: System Tuning Agent"
-  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Next recommended recipe: R14 System / Agent Capability Tuning"
+  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Next recommended recipe: R0 Restore / Resume Context"
   assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Problem handling: completed (docs/PROBLEM_HANDLING_REPORT.md)"
 
   node -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" "$PRESERVE_DIR/.gstack/project-state.json"
   assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.phase === 'maintenance'" "re-init did not preserve phase"
   assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.last_completed_agent === 'System Tuning Agent'" "re-init did not preserve last completed agent"
-  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.next_recommended_recipe === 'R14 System / Agent Capability Tuning'" "re-init did not preserve next recipe"
+  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.next_recommended_agent === 'Orchestrator'" "re-init did not clear recovered next agent"
+  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.next_recommended_recipe === 'R0 Restore / Resume Context'" "re-init did not clear recovered next recipe"
   assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "!state.warnings.includes('gbrain_query_timeout')" "re-init did not clear stale readiness warning"
   assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.problem_handling && state.problem_handling.issue_id === 'gbrain_query_timeout'" "re-init did not preserve problem handling state"
   assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.system_tuning && state.system_tuning.active_issue === 'harness-gbrain-timeout-state-template'" "re-init did not preserve system tuning state"
   assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.usage && state.usage.latest_event === 'harness_init'" "re-init did not record latest usage run"
 
-  pass "re-init preserves reports and operating state while refreshing foundation state"
+  pass "re-init preserves reports and resolved issue history while clearing recovered routing state"
 }
 
 test_usage_report() {

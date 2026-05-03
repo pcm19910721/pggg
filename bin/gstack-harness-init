@@ -457,9 +457,9 @@ if command -v gbrain >/dev/null 2>&1; then
     else
       GBRAIN_PAGES="unknown"
     fi
-    if GBRAIN_QUERY_OUTPUT="$(timeout 8s gbrain query "project $PROJECT_ID harness readiness" --no-expand 2>&1)"; then
+    if GBRAIN_QUERY_OUTPUT="$(timeout 20s gbrain query "gbrain healthcheck project memory" --no-expand --limit 1 2>&1)"; then
       GBRAIN_QUERY_STATUS="ready"
-      GBRAIN_QUERY_EVIDENCE="query completed"
+      GBRAIN_QUERY_EVIDENCE="health query completed"
     else
       GBRAIN_QUERY_RC="$?"
       if [ "$GBRAIN_QUERY_RC" -eq 124 ]; then
@@ -1426,7 +1426,9 @@ EOF
 write_file "docs/CODEX_START_PROMPT.md" "$CODEX_START_PROMPT"
 
 if [ "$GBRAIN_STATUS" = "ready" ] && [ "$DRY_RUN" -ne 1 ]; then
-  if timeout 8s gbrain put "project/$PROJECT_ID/overview" <<EOF >/dev/null 2>&1
+  if timeout 8s gbrain get "project/$PROJECT_ID/overview" >/dev/null 2>&1; then
+    :
+  elif timeout 30s env -u OPENAI_API_KEY gbrain put "project/$PROJECT_ID/overview" <<EOF >/dev/null 2>&1
 # Project Overview: $PROJECT_ID
 
 ## Status
@@ -1446,10 +1448,10 @@ $EFFECTIVE_MODE
 $FOUNDATION_VERDICT
 EOF
   then
-    timeout 4s gbrain tag "project/$PROJECT_ID/overview" scope:project >/dev/null 2>&1 || true
-    timeout 4s gbrain tag "project/$PROJECT_ID/overview" "project:$PROJECT_ID" >/dev/null 2>&1 || true
-    timeout 4s gbrain tag "project/$PROJECT_ID/overview" type:overview >/dev/null 2>&1 || true
-    timeout 4s gbrain tag "project/$PROJECT_ID/overview" status:active >/dev/null 2>&1 || true
+    timeout 10s gbrain tag "project/$PROJECT_ID/overview" scope:project >/dev/null 2>&1 || true
+    timeout 10s gbrain tag "project/$PROJECT_ID/overview" "project:$PROJECT_ID" >/dev/null 2>&1 || true
+    timeout 10s gbrain tag "project/$PROJECT_ID/overview" type:overview >/dev/null 2>&1 || true
+    timeout 10s gbrain tag "project/$PROJECT_ID/overview" status:active >/dev/null 2>&1 || true
   else
     log "warning: gbrain overview update skipped or timed out"
   fi
