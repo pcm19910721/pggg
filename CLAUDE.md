@@ -66,7 +66,7 @@ Quality gate before shipping:
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **gstack-multiagent** (465 symbols, 598 relationships, 17 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **gstack-multiagent** (503 symbols, 636 relationships, 17 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -106,3 +106,85 @@ This project is indexed by GitNexus as **gstack-multiagent** (465 symbols, 598 r
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+<!-- GSTACK_HARNESS_START -->
+## Project Orchestrator
+
+This project uses a project-level gstack orchestration layer.
+
+Do not recreate gstack skills locally. Use the project docs to select and compose existing gstack skills.
+
+Continuous tuning means improving the project-level multi-agent system: which agents exist, what capabilities they need, how they hand off, and how workflows should change. It does not mean rewriting gstack skill internals.
+
+gbrain is the canonical long-term memory source. If gbrain conflicts with local memory docs, prefer gbrain and update the stale docs.
+When writing durable memory, follow `GBRAIN_SCHEMA.md`.
+
+Before doing substantial work:
+
+1. Read `PROJECT_STATE.md`.
+2. Read `.gstack/project-state.json` if present.
+3. Read `.gstack/harness/agents/TEAM.md` and `.gstack/harness/agents/problem-handling.md` if present.
+4. Read `docs/PROBLEM_HANDLING_REPORT.md` and `docs/SYSTEM_TUNING_REPORT.md` if present.
+5. Read `.ai-context/project.json` and `docs/CODE_CONTEXT_REPORT.md` if present.
+6. Read `HARNESS_PRODUCT_USAGE.md`.
+7. Read `GSTACK_SKILL_REGISTRY.md`.
+8. Read `WORKFLOW_RECIPES.md`.
+9. Read `ORCHESTRATOR_RUNBOOK.md`.
+10. Read `SYSTEM_TUNING_LOOP.md`.
+11. Read `MEMORY_ARCHITECTURE.md`.
+12. Read `GBRAIN_SCHEMA.md`.
+13. For existing-code product, build, review, or incident work, run `node scripts/ai-context-bridge.mjs status` when `.ai-context/project.json` exists; refresh GitNexus only when stale and graph accuracy matters.
+14. Query relevant gbrain memory if available. If gbrain query hits PGLite lock or timeout, retry once, then route the issue to Problem Handling Agent. Continue from local state only for low-risk recipes.
+15. Read `docs/AGENT_ORCHESTRATOR.md`.
+16. Read `docs/AGENT_WORKFLOWS.md`.
+17. Check Foundation Readiness. If readiness is unknown, partial, or blocked, run the Foundation Readiness / Remediation workflow before business work.
+18. Classify the user's request.
+19. Choose the appropriate workflow recipe and gstack skills.
+20. After completing work, update `PROJECT_STATE.md` and `.gstack/project-state.json` with artifact/evidence references and system tuning notes.
+21. Write durable project/agent/system learnings to gbrain using `GBRAIN_SCHEMA.md`.
+
+Usage feedback automation:
+
+- At the start of a real work session, record a snapshot with `.gstack/harness/bin/gstack-harness-record-run --event session_start --status in_progress`.
+- After updating project state at the end of the session, record the outcome with `.gstack/harness/bin/gstack-harness-record-run --event session_end --status completed` or the actual status.
+- Include `--where-stalled`, `--user-correction`, `--capability-gap`, `--warning`, and `--blocker` whenever those signals occurred.
+
+Prefer real verification:
+
+- Run project tests when relevant.
+- Start the app when needed.
+- Use `/browse`, `/qa`, or `/qa-only` for real browser testing.
+- Use `/review` before shipping.
+- Use `/ship` only after quality gates are satisfied.
+
+Routing rules:
+
+- System readiness / can the harness take over → Foundation Readiness Agent.
+- Missing gbrain/gstack/project protocol/runtime/runner setup → Foundation Remediation Agent.
+- Runtime warning / timeout / repeated failure / unclear blocker → Problem Handling Agent.
+- Need to understand an existing codebase, task impact, call chain, or diff blast radius → Code Context Agent.
+- New idea / unclear product direction → existing code first Code Context Agent, then Product Agent.
+- Need full plan → Planning Agent.
+- UI/UX/design work → Design Agent.
+- Architecture / implementation plan → Architecture Agent.
+- Code implementation → Build Agent.
+- "Test it", "does it work", "run it" → Reality Test Agent.
+- Code review / merge readiness → Review Agent.
+- Security / performance concern → Security/Perf Agent.
+- Ship / PR / deploy → Release Agent.
+- Bug / regression / broken behavior → Maintenance Agent.
+
+Quality gate before shipping:
+
+- `Health` should be passing.
+- `Browser QA` should be passing for user-visible features, or skipped with a clear reason.
+- `Windows QA` should be passing for Windows-bound features, or skipped with a clear reason.
+- `Review` should be passing.
+- `Blockers` should be empty.
+
+Problem handling rule:
+
+- Do not leave warnings as loose narration.
+- Route timeout, runner failure, repeated friction, and missing evidence to Problem Handling Agent.
+- Problem Handling Agent decides whether to auto-remediate, downgrade for low-risk work, upgrade to blocker, or create a System Tuning issue.
+<!-- GSTACK_HARNESS_END -->

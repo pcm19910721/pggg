@@ -3,22 +3,28 @@
 ## Current
 
 - Phase: foundation
-- Goal: Turn the gstack multi-agent workflow documents into a usable project-level harness protocol.
-- Branch: none
-- Last updated: 2026-04-30
-- Last completed agent: Orchestrator
-- Next recommended agent: Orchestrator
-- Workspace mode: template_source
+- Goal: Project-level gstack harness installed by local template source.
+- Branch: main
+- Last updated: 2026-05-03
+- Last completed agent: Foundation Remediation Agent
+- Next recommended agent: Problem Handling Agent
+- Next recommended recipe: Problem Handling preflight, then R0 Restore / Resume Context
+- Workspace mode: target_project
 
 ## Foundation
 
 - Readiness: ready
-- Last readiness check: docs/FOUNDATION_READINESS_RECHECK.md
-- Remediation: partial
+- Last readiness check: docs/FOUNDATION_READINESS_REPORT.md
+- Remediation: fixed
+- Remediation report: docs/FOUNDATION_REMEDIATION_REPORT.md
 - gbrain: ready
+- gbrain query: timeout
 - gstack: ready
 - Project protocol: ready
-- Runtime: ready
+- Structured state: .gstack/project-state.json
+- Agent team: .gstack/harness/agents/TEAM.md
+- Problem handling: required
+- Runtime: not_required
 - Runners: ready
 - Memory policy: ready
 
@@ -35,7 +41,7 @@
 ## Quality Gates
 
 - Foundation Readiness: ready
-- Code Context: missing
+- Code Context: ready
 - Health: unknown
 - Browser QA: not_run
 - Windows QA: skipped
@@ -47,14 +53,19 @@
 ## Gate Evidence
 
 - Foundation Readiness:
-  - Report: docs/FOUNDATION_READINESS_RECHECK.md
-  - Checked at: 2026-04-28
+  - Report: docs/FOUNDATION_READINESS_REPORT.md
+  - Checked at: 2026-05-03
   - Blockers: none
 - Code Context:
   - Provider: GitNexus
-  - Config: target projects get .ai-context/project.json
-  - Status:
-  - Index summary:
+  - Config: .ai-context/project.json
+  - Status: .ai-context/gitnexus-status.json
+  - Index summary: .ai-context/gitnexus-index.md
+  - Run files: .ai-context/runs/
+  - Optional UA knowledge graph: .understand-anything/knowledge-graph.json
+  - Optional UA domain graph: .understand-anything/domain-graph.json
+  - Optional UA diff overlay: .understand-anything/diff-overlay.json
+  - Last updated: 2026-05-03T05:31:41.737Z
   - Skip reason:
 - Health:
   - Command: not_required
@@ -63,14 +74,14 @@
 - Browser QA:
   - URL: not_required
   - Artifact:
-  - Skip reason: docs-only protocol workspace, no runtime surface
+  - Skip reason:
 - Windows QA:
   - Target OS: windows
   - Runner: not_required
   - Artifact:
-  - Skip reason: current dry run does not make Windows-only behavior claims
+  - Skip reason: no Windows-only claims during harness init
 - Review:
-  - Base: none
+  - Base:
   - Artifact:
 - Security:
   - Artifact:
@@ -83,11 +94,18 @@
 
 - Foundation readiness report: docs/FOUNDATION_READINESS_REPORT.md
 - Foundation remediation report: docs/FOUNDATION_REMEDIATION_REPORT.md
+- Agent team: .gstack/harness/agents/TEAM.md
+- Problem handling agent: .gstack/harness/agents/problem-handling.md
+- Problem handling report: docs/PROBLEM_HANDLING_REPORT.md
+- System tuning report: docs/SYSTEM_TUNING_REPORT.md
 - Code context report: docs/CODE_CONTEXT_REPORT.md
-- Code context bridge: scripts/ai-context-bridge.mjs
-- Code context config: target projects get .ai-context/project.json
-- GitNexus index/status: generated in target projects under .ai-context/
-- Optional UA artifacts: .understand-anything/* only when dashboard/onboarding/domain/fallback is used
+- Code context config: .ai-context/project.json
+- GitNexus status: .ai-context/gitnexus-status.json
+- GitNexus index summary: .ai-context/gitnexus-index.md
+- GitNexus run files: .ai-context/runs/
+- Optional UA knowledge graph: .understand-anything/knowledge-graph.json
+- Optional UA domain graph: .understand-anything/domain-graph.json
+- Optional UA diff overlay: .understand-anything/diff-overlay.json
 - Product brief:
 - Design system:
 - Implementation plan:
@@ -100,34 +118,19 @@
 
 ## Blockers
 
-- None
+None
+
+## Warnings
+
+- gbrain_query_timeout
+- gbrain_sync_off
 
 ## Recent Agent Runs
 
-- 2026-04-28: Foundation Readiness dry run completed. Verdict: partial.
-- 2026-04-28: Foundation Remediation created PROJECT_STATE.md, CLAUDE.md, seeded gbrain core pages. Verdict: partial.
-- 2026-04-28: Foundation Readiness recheck completed. Cleared project_state_missing, gbrain_unseeded, and local_instructions_missing. Verdict: ready for template_source mode.
-- 2026-04-28: Implemented local stage-1 `bin/gstack-harness-init`; verified docs-only install in `/tmp/gstack-harness-test2`.
-- 2026-04-28: Upgraded `bin/gstack-harness-init` to reconcile existing files: harness docs get `.bak-<timestamp>` backups and `CLAUDE.md` uses a managed block.
-- 2026-04-28: Added Codex handoff path: init writes `docs/CODEX_START_PROMPT.md` and can open interactive Codex in the target project with the first Orchestrator prompt.
-- 2026-04-28: Captured first real target handoff feedback from `.codex-tools`: Codex correctly chose R0, but gbrain query hit a PGLite lock timeout. Added query-timeout fallback policy and `.gstack/project-state.json` generation to the harness.
-- 2026-04-28: Changed product default: `gstack-harness-init` is the single standard onboarding flow and opens Codex after install/upgrade by default.
-- 2026-04-28: Tightened product framing: the normal user path is one standard flow, `cd target-project && gstack-harness-init`; flags are maintainer/debug controls, not onboarding choices.
-- 2026-04-28: Added required-core Problem Handling Agent and standard agent team installation under `.gstack/harness/agents/`; warnings/timeouts now route to Problem Handling instead of staying as loose Orchestrator narration.
-- 2026-04-28: Absorbed `.codex-tools` R14 feedback into the template source: init now seeds missing `docs/PROBLEM_HANDLING_REPORT.md` and `docs/SYSTEM_TUNING_REPORT.md` templates, preserves existing report artifacts, and links them in `.gstack/project-state.json`.
-- 2026-04-28: Hardened re-init behavior: installer now preserves existing project operating state fields like phase, next recommendation, warnings, problem_handling, and system_tuning while refreshing foundation/runtime/protocol readiness.
-- 2026-04-28: Added `bin/gstack-harness-self-test` for template-source maintenance; it verifies fresh install, managed block, JSON parse, agent team files, report templates, and re-init state preservation.
-- 2026-04-29: Added automated usage feedback loop: target installs now include `gstack-harness-record-run`, write `.gstack/usage-runs/*.json`, register projects for aggregation, record standard Codex session start/end around `gstack-harness-init`, and `gstack-harness-usage-report` generates usage feedback summaries. Self-test now verifies recording and aggregation.
-- 2026-04-29: Added `gstack-harness-enable-report-timer` to write a systemd user service/timer for reboot-resilient usage feedback aggregation. The command supports no-enable/dry-run testing and optional linger for pre-login boot execution.
-- 2026-04-29: Added `pcm-harness` as the single user-facing command. `gstack-harness-init` remains the internal implementation, while normal target-project usage is now `cd target-project && pcm-harness`. Target-installed `pcm-harness` resolves back to the template source through `.gstack/project-state.json`.
-- 2026-04-30: Added Windows PowerShell shim files `pcm-harness.cmd` and `pcm-harness.ps1`. Windows `pcm-harness` now bridges into WSL, converts the current Windows directory to `/mnt/<drive>/...`, and calls the WSL template-source implementation.
-- 2026-04-30: Added Codebase Map Agent as a project-defined starter role. Existing-code workflows now run Understand Anything mapping before `/office-hours`, task implementation, pre-landing review, and incident triage when codebase context or impact evidence is needed.
-- 2026-05-03: Converted Codebase Map into GitNexus-first Code Context. Target installs now generate `.ai-context/project.json`, install `scripts/ai-context-bridge.mjs`, use GitNexus status/query/context/impact/detect-changes as the default code facts source, and keep UA optional for dashboard/onboarding/domain/fallback.
+- 2026-05-03: pcm-harness installed harness protocol. Verdict: ready.
 
 ## Notes
 
-- This is currently a docs-only protocol workspace. Runtime commands are intentionally marked `not_required`.
-- Workspace mode is `template_source`; `not_git_repo` is a warning for template maintenance, not a blocker for docs/protocol work.
-- If this workspace becomes the source-of-truth repo for the harness product, initialize git before review/release workflows.
-- Stage 1 usage: expose `/home/adminpcm/gstack-multiagent/bin/pcm-harness` on PATH, then run `pcm-harness` inside a target project.
+- Installed from template source: /home/adminpcm/gstack-multiagent
+- This target project can override default replaceable agents in .gstack/harness/.
 - Do not modify gstack skill internals from this project.

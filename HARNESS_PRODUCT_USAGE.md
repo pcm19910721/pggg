@@ -180,6 +180,35 @@ Usage report timer unit 生成
 re-init 保留运行报告和运行态
 ```
 
+## Template Source Health Gate
+
+目标项目接入后，也要把 `template_source` 本身作为固定检查项。原因是目标项目运行的 installer、readiness、remediation 和 agent/team 模板都来自模板源；如果模板源没有 Git baseline、自测失败或 GitNexus stale，目标项目重跑 `pcm-harness` 只会继续复制有问题的流程。
+
+模板源健康检查：
+
+```bash
+cd /home/adminpcm/gstack-multiagent
+git status --short
+bin/gstack-harness-self-test
+npx gitnexus status
+```
+
+目标项目健康检查：
+
+```bash
+cd /path/to/target-project
+pcm-harness --no-start-codex
+.gstack/harness/bin/gstack-harness-readiness --target .
+```
+
+建议顺序：
+
+```text
+1. 先修模板源：self-test 通过，GitNexus up-to-date，harness 逻辑已提交。
+2. 再回目标项目重跑 pcm-harness，让目标项目拿到最新 installer/readiness/remediation。
+3. 目标项目自己的 runtime 依赖、业务测试失败、真实凭证和部署问题，仍在目标项目处理。
+```
+
 ## Usage Feedback Automation
 
 真实使用反馈默认自动落在目标项目：

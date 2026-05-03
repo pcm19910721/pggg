@@ -1,0 +1,22 @@
+{
+  "project_id": "gstack-multiagent",
+  "repo_path": "/home/adminpcm/gstack-multiagent",
+  "branch": "main",
+  "remote_url": null,
+  "git_head": "baa054a87030618e947220dc3711fc976bc641fd",
+  "gitnexus_repo": "gstack-multiagent",
+  "gitnexus_meta_path": "/home/adminpcm/gstack-multiagent/.gitnexus/meta.json",
+  "indexed": true,
+  "stale": false,
+  "last_commit": "baa054a87030618e947220dc3711fc976bc641fd",
+  "indexed_at": "2026-05-03T05:28:15.500Z",
+  "stats": {
+    "files": 23,
+    "nodes": 465,
+    "edges": 598,
+    "communities": 6,
+    "processes": 17,
+    "embeddings": 0
+  },
+  "capabilities": null
+}

@@ -1,0 +1,55 @@
+{
+  "schema_version": "0.1.0",
+  "project_id": "gstack-multiagent",
+  "repo_path": "/home/adminpcm/gstack-multiagent",
+  "base_branch": "main",
+  "code_context_provider": "gitnexus",
+  "gitnexus": {
+    "repo": "gstack-multiagent",
+    "command": ["gitnexus"],
+    "fallback_command": ["npx", "-y", "gitnexus@latest"],
+    "prefer_local": true,
+    "owns": ["source_code", "symbols", "imports", "calls", "execution_flows", "impact", "diff_analysis"],
+    "embeddings": true,
+    "skip_agents_md": true
+  },
+  "gbrain": {
+    "owns": ["memory", "decisions", "state", "summaries", "reports", "handoffs"],
+    "store_gitnexus_outputs": "summaries_only",
+    "never_import_paths": ["src/", "app/", "lib/", "packages/", "tests/", ".gitnexus/", ".understand-anything/"],
+    "pages": {
+      "overview": "project/gstack-multiagent/overview",
+      "state": "project/gstack-multiagent/state",
+      "foundation_readiness": "project/gstack-multiagent/foundation-readiness",
+      "architecture": "project/gstack-multiagent/architecture",
+      "decisions": "project/gstack-multiagent/decisions",
+      "assumptions": "project/gstack-multiagent/assumptions",
+      "hotspots": "project/gstack-multiagent/hotspots",
+      "code_context": "project/gstack-multiagent/code-context",
+      "quality_gates": "project/gstack-multiagent/quality-gates",
+      "handoff": "project/gstack-multiagent/handoff",
+      "gitnexus_index": "project/gstack-multiagent/gitnexus-index"
+    }
+  },
+  "optional_providers": {
+    "understand_anything": {
+      "use_for": ["visual_dashboard", "onboarding", "domain_graph", "fallback"],
+      "artifacts": {
+        "knowledge_graph": ".understand-anything/knowledge-graph.json",
+        "domain_graph": ".understand-anything/domain-graph.json",
+        "diff_overlay": ".understand-anything/diff-overlay.json"
+      }
+    }
+  },
+  "quality_gates": {
+    "test_commands": [],
+    "dev_commands": [],
+    "must_run_before_finish": [],
+    "impact_required_for": ["api", "schema", "auth", "shared", "billing", "permissions", "core-flow"]
+  },
+  "automation": {
+    "auto_refresh_gitnexus": true,
+    "write_gbrain_change_notes": false,
+    "write_gbrain_index_status": false
+  }
+}

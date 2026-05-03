@@ -1,0 +1,20 @@
+{
+  "status": "ready",
+  "project_id": "gstack-multiagent",
+  "target": "/home/adminpcm/gstack-multiagent",
+  "mode": "docs-only",
+  "gbrain": "ready",
+  "gbrain_core_missing": [],
+  "gbrain_query": "timeout",
+  "gstack": "ready",
+  "git": "ready",
+  "runtime": "not_required",
+  "code_context": "ready",
+  "blockers": [],
+  "warnings": [
+    "gbrain_query_timeout",
+    "gbrain_sync_off"
+  ],
+  "next_recommended_agent": "Problem Handling Agent",
+  "next_recommended_recipe": "Problem Handling preflight, then R0 Restore / Resume Context"
+}

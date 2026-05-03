@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+pcm-harness - one-command project harness entrypoint
+
+Usage:
+  cd /path/to/project
+  pcm-harness
+
+This command installs, upgrades, refreshes, records usage, and hands the
+current project to the Orchestrator.
+EOF
+}
+
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+INIT="$SCRIPT_DIR/gstack-harness-init"
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  usage
+  exit 0
+fi
+
+if [ ! -x "$INIT" ]; then
+  TARGET_CANDIDATE="$(cd "$SCRIPT_DIR/../../.." 2>/dev/null && pwd || true)"
+  if [ -n "$TARGET_CANDIDATE" ] && [ -f "$TARGET_CANDIDATE/.gstack/project-state.json" ] && command -v node >/dev/null 2>&1; then
+    TEMPLATE_SOURCE="$(node -e 'const fs=require("fs"); const p=process.argv[1]; try { const s=JSON.parse(fs.readFileSync(p,"utf8")); if (s.template_source) process.stdout.write(s.template_source); } catch {}' "$TARGET_CANDIDATE/.gstack/project-state.json" 2>/dev/null || true)"
+    if [ -n "$TEMPLATE_SOURCE" ] && [ -x "$TEMPLATE_SOURCE/bin/gstack-harness-init" ]; then
+      INIT="$TEMPLATE_SOURCE/bin/gstack-harness-init"
+    fi
+  fi
+fi
+
+if [ ! -x "$INIT" ]; then
+  echo "ERROR: missing harness implementation. Expected $SCRIPT_DIR/gstack-harness-init or template_source/bin/gstack-harness-init from .gstack/project-state.json" >&2
+  exit 1
+fi
+
+exec "$INIT" "$@"

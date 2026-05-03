@@ -127,6 +127,28 @@ Windows 实测      → R16 Cross-OS / Windows Reality Testing
 
 已有代码项目的产品判断默认先走 R0.5，再进入 R1。R0.5 默认用 GitNexus 获取当前代码事实；UA 只在需要可视化、onboarding、domain graph 或 fallback 时使用。这样 `/office-hours` 基于当前能力、核心流程和风险热点判断方向，而不是从空白假设开始。
 
+## Template Source Gate
+
+如果目标项目的 `.gstack/project-state.json` 里存在 `template_source`，总控还要把模板源健康作为流程检查项。这个检查不替代目标项目 readiness，而是防止目标项目反复接入旧 installer 或坏模板。
+
+推荐检查：
+
+```bash
+TEMPLATE_SOURCE="$(node -e 'const fs=require("fs"); try { const s=JSON.parse(fs.readFileSync(".gstack/project-state.json","utf8")); process.stdout.write(s.template_source || ""); } catch {}')"
+if [ -n "$TEMPLATE_SOURCE" ]; then
+  (cd "$TEMPLATE_SOURCE" && bin/gstack-harness-self-test)
+  (cd "$TEMPLATE_SOURCE" && npx gitnexus status)
+fi
+```
+
+如果模板源自测失败、GitNexus stale，或模板源有未提交 harness 逻辑变更，应先处理模板源，再让目标项目重跑：
+
+```bash
+pcm-harness --no-start-codex
+```
+
+模板源问题归 System Tuning / harness maintenance，不应通过修改目标项目业务代码绕过。
+
 运行中问题默认路由：
 
 ```text

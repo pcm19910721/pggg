@@ -1,73 +1,61 @@
 # Foundation Remediation Report
 
-Generated: 2026-04-28
+Generated: 2026-05-03
 Project: gstack-multiagent
-Source readiness report: docs/FOUNDATION_READINESS_REPORT.md
-Status: partial
+Status: fixed
 
-## Summary
+## Latest Foundation Remediation
 
-Foundation remediation fixed the missing local state and seeded gbrain with core system/project memory. Remaining blockers are repository ownership and release-grade source-control evidence.
-
-## Actions Taken
-
-| Action | Target | Evidence |
-|---|---|---|
-| Created local project state | `PROJECT_STATE.md` | Project now has a foundation phase, gate evidence, blockers, and runtime marked docs-only |
-| Created local agent instructions | `CLAUDE.md` | Project now has orchestrator startup rules and Foundation Readiness routing |
-| Seeded system principles | `system/orchestration-principles` | gbrain page created |
-| Seeded agent model | `system/agent-capability-model` | gbrain page created |
-| Seeded tuning decisions | `system/tuning-decisions` | gbrain page created |
-| Seeded capability backlog | `system/capability-gap-backlog` | gbrain page created |
-| Seeded project overview | `project/gstack-multiagent/overview` | gbrain page created |
-| Seeded project decisions | `project/gstack-multiagent/decisions` | gbrain page created |
-| Seeded memory policy | `project/gstack-multiagent/memory-policy` | gbrain page created |
-
-## GBrain Pages Seeded
-
-- `system/orchestration-principles`
-- `system/agent-capability-model`
-- `system/tuning-decisions`
-- `system/capability-gap-backlog`
-- `project/gstack-multiagent/overview`
-- `project/gstack-multiagent/decisions`
-- `project/gstack-multiagent/memory-policy`
-
-## Files Changed
-
-- `PROJECT_STATE.md`
-- `CLAUDE.md`
-- `docs/FOUNDATION_REMEDIATION_REPORT.md`
-
-## Remaining Blockers
-
-- `not_git_repo`: This directory is not a git repository. Review, release, branch-bound gate evidence, and commit-bound artifacts remain blocked.
-
-## Remaining Warnings
-
-- `gbrain_sync_off`: gstack memory sync remains off. This is acceptable for local experimentation, but cross-machine reuse still needs an explicit sync policy.
-- `runtime_docs_only`: Runtime commands are marked `not_required` because this is currently a docs-only protocol workspace.
-- `windows_host_unconfigured`: Windows Test Host remains unconfigured. It is not required until the project makes Windows-only runtime claims.
-
-## Post-Remediation Verdict
-
-`partial`
-
-The project is ready for planning, protocol editing, and gbrain-backed memory lookup. It is not ready for release-style workflows until the repository decision is made.
-
-## Next Recommended Action
-
-Recipe: `R-1 Foundation Readiness Check`
-
-Reason:
-
-```text
-Run readiness again to confirm gbrain is no longer empty and local protocol blockers are resolved.
+```yaml
+foundation_remediation:
+  status: fixed
+  source_readiness_report: docs/FOUNDATION_READINESS_REPORT.md
+  generated_at: 2026-05-03T13:30:02+08:00
+  actions_taken:
+    - action: verify_gbrain_page
+      target: system/orchestration-principles
+      evidence: core gbrain page already present
+    - action: verify_gbrain_page
+      target: system/harness-product-usage
+      evidence: core gbrain page already present
+    - action: verify_gbrain_page
+      target: system/capability-gap-backlog
+      evidence: core gbrain page already present
+    - action: seed_gbrain_page
+      target: project/gstack-multiagent/overview
+      evidence: seeded core gbrain page
+    - action: seed_gbrain_page
+      target: project/gstack-multiagent/state
+      evidence: seeded core gbrain page
+    - action: seed_gbrain_page
+      target: project/gstack-multiagent/foundation-readiness
+      evidence: seeded core gbrain page
+    - action: seed_gbrain_page
+      target: project/gstack-multiagent/code-context
+      evidence: seeded core gbrain page
+    - action: seed_gbrain_page
+      target: project/gstack-multiagent/quality-gates
+      evidence: seeded core gbrain page
+    - action: refresh_code_context_status
+      target: docs/CODE_CONTEXT_REPORT.md
+      evidence: ran GitNexus bridge status
+  files_changed:
+    - path: docs/CODE_CONTEXT_REPORT.md
+      reason: refreshed by bridge status
+    - path: .ai-context/gitnexus-status.json
+      reason: refreshed by bridge status
+  gbrain_pages_seeded: []
+  remaining_blockers:
+    []
+  warnings:
+    []
+  post_remediation_readiness: ready
+  next_recommended_recipe:
+    id: R0 Restore / Resume Context
+    reason: foundation protocol is ready for orchestration
 ```
 
-After the复检:
+## Scope
 
-```text
-If verdict remains partial only because not_git_repo, decide whether this directory should become a git repo.
-If docs-only is intentional, record an explicit skip policy for release/review gates.
-```
+- Remediated only harness-owned protocol, reports, bridge config, usage-run directories, and local runner artifacts.
+- Did not modify business source code, gstack skill internals, credentials, deploy settings, or destructive configuration.
