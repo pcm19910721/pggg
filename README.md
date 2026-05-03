@@ -128,6 +128,8 @@ docs/RETRO.md
 ```text
 node scripts/ai-context-bridge.mjs status
 → node scripts/ai-context-bridge.mjs refresh 如果 GitNexus stale 且需要准确图谱
+→ node scripts/ai-context-bridge.mjs sync-gbrain --dry-run
+→ node scripts/ai-context-bridge.mjs sync-gbrain
 → GitNexus query/context/impact/detect-changes
 → 可选 /understand-dashboard / /understand-domain / /understand-onboard
 → /office-hours
@@ -208,7 +210,7 @@ pcm-harness
 bin/gstack-harness-self-test
 ```
 
-它会在临时目录验证 fresh install、managed block、JSON parse、Agent team、Problem Handling/System Tuning report 模板、usage run 自动记录、usage feedback report 聚合、timer unit 生成，以及 re-init 不覆盖运行态。
+它会在临时目录验证 fresh install、managed block、JSON parse、Agent team、sync-gbrain JSON 输出和 gbrain project memory 写入、Problem Handling/System Tuning report 模板、usage run 自动记录、usage feedback report 聚合、timer unit 生成，以及 re-init 不覆盖运行态。
 
 真实使用反馈现在也有自动化落点：目标项目会写 `.gstack/usage-runs/*.json`，标准入口会自动记录 init 和 Codex session 生命周期，模板源可以用 `bin/gstack-harness-usage-report` 聚合所有已注册目标项目并生成 `docs/USAGE_FEEDBACK_REPORT.md`。需要重启后自动聚合时，运行一次 `bin/gstack-harness-enable-report-timer` 写入并启用 systemd user timer。
 

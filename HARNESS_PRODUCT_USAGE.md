@@ -143,12 +143,13 @@ pcm-harness
 8. 生成 CLAUDE.md 或 AGENTS.md
 9. seed gbrain project pages
 10. 跑 Foundation Readiness
-11. 如果 partial/blocked，跑 Foundation Remediation
-12. 如果出现 warning/timeout/failure，派发 Problem Handling Agent
-13. 输出 next recommended recipe / agent
-14. 自动记录 `.gstack/usage-runs/<run_id>.json`
-15. 把目标项目登记到本机 harness registry，供模板源聚合真实使用反馈
-16. 默认打开 Codex 并发送第一条 Orchestrator 接管提示
+11. 如果 gbrain 项目记忆缺失或 stale，Readiness 标记 partial
+12. 如果 partial/blocked，跑 Foundation Remediation；其中会调用 `node scripts/ai-context-bridge.mjs sync-gbrain`
+13. 如果出现 warning/timeout/failure，派发 Problem Handling Agent
+14. 输出 next recommended recipe / agent
+15. 自动记录 `.gstack/usage-runs/<run_id>.json`
+16. 把目标项目登记到本机 harness registry，供模板源聚合真实使用反馈
+17. 默认打开 Codex 并发送第一条 Orchestrator 接管提示
 ```
 
 内部维护/调试开关可以存在于实现里，但它们不作为用户产品路径，不出现在正常 onboarding 指引里。
@@ -468,6 +469,7 @@ Code Context Agent 负责维护 GitNexus 当前代码事实，并把项目概览
 ```text
 node scripts/ai-context-bridge.mjs status
 node scripts/ai-context-bridge.mjs refresh
+node scripts/ai-context-bridge.mjs sync-gbrain
 gitnexus query
 gitnexus context
 node scripts/ai-context-bridge.mjs postchange
@@ -481,9 +483,9 @@ gitnexus impact
 标准顺序：
 
 ```text
-已有代码项目：Code Context Agent 先查 GitNexus 代码事实，再 Product Agent 跑 /office-hours。
-具体任务：Code Context Agent 先定位模块和调用链，再 Build Agent 改代码。
-提交前：Code Context Agent 跑 bridge postchange / GitNexus impact，再 Review / Release。
+已有代码项目：Code Context Agent 先查 GitNexus 代码事实，运行 sync-gbrain 写入稳定摘要，再 Product Agent 跑 /office-hours。
+具体任务：Code Context Agent 先定位模块和调用链；如果结论会复用，运行 sync-gbrain 后再交给 Build Agent。
+提交前：Code Context Agent 跑 bridge postchange / GitNexus impact，再 sync-gbrain，然后 Review / Release。
 事故：Maintenance Agent 跑 /investigate，Code Context Agent 辅助定位根因模块和影响面。
 ```
 
@@ -557,7 +559,15 @@ gbrain 中对应页面：
 ```text
 project/<project-id>/agent-overrides
 project/<project-id>/workflow-overrides
+project/<project-id>/overview
+project/<project-id>/state
+project/<project-id>/foundation-readiness
+project/<project-id>/code-context
+project/<project-id>/gitnexus-index
+project/<project-id>/architecture
+project/<project-id>/hotspots
 project/<project-id>/quality-gates
+project/<project-id>/handoff
 agent/<agent-id>/charter
 agent/<agent-id>/handoff
 ```
@@ -628,7 +638,7 @@ next_recommended_recipe:
 ```text
 在任意目标项目里运行 `pcm-harness`，就能安装 harness 基础盘子。
 安装后 Orchestrator 能知道项目在哪、下一步该做什么、缺什么证据。
-gbrain 有项目记忆。
+gbrain 有 project/<id>/overview、state、foundation-readiness、code-context、quality-gates、gitnexus-index、architecture、hotspots、handoff 等项目记忆，且带 project_uid，多个项目不会混写。
 gstack skills 仍是唯一能力源。
 用户只在高风险或不可推断处参与。
 ```

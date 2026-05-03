@@ -164,6 +164,8 @@ Layer: project_defined
 → 如果未索引或 stale 且需要准确图谱：node scripts/ai-context-bridge.mjs refresh
 → GitNexus query/context 核心架构、入口、关键模块、业务流程和风险点是什么？
 → GitNexus query/context 新 agent 应该按什么顺序理解这个项目？
+→ node scripts/ai-context-bridge.mjs sync-gbrain --dry-run
+→ node scripts/ai-context-bridge.mjs sync-gbrain
 → 可选 /understand-dashboard、/understand-onboard、/understand-domain
 ```
 
@@ -183,6 +185,8 @@ node scripts/ai-context-bridge.mjs postchange --scope all
 → 高风险符号：node scripts/ai-context-bridge.mjs postchange --scope all --impact SymbolName
 → GitNexus query/context 这次改动影响哪些组件、层、业务流程？
 → GitNexus query/context 这次最应该补哪些测试？
+→ node scripts/ai-context-bridge.mjs sync-gbrain --dry-run
+→ node scripts/ai-context-bridge.mjs sync-gbrain
 → 可选 /understand-dashboard，用可视化复核
 ```
 
@@ -208,9 +212,13 @@ docs/CODE_CONTEXT_REPORT.md
 
 ```text
 project/<project-id>/overview
+project/<project-id>/state
+project/<project-id>/foundation-readiness
 project/<project-id>/architecture
 project/<project-id>/reading-path
 project/<project-id>/hotspots
+project/<project-id>/quality-gates
+project/<project-id>/handoff
 project/<project-id>/gitnexus-index
 project/<project-id>/code-context
 artifact/<project-id>/impact-analysis/<date-or-run-id>

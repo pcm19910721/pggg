@@ -30,8 +30,13 @@ This bridge keeps code facts and durable memory separate.
 ## gbrain Pages
 
 - `project/<id>/gitnexus-index`: GitNexus index status summary.
+- `project/<id>/state`: concise current project state from `.gstack/project-state.json`.
+- `project/<id>/foundation-readiness`: readiness status from `docs/FOUNDATION_READINESS_REPORT.md`.
 - `project/<id>/architecture`: concise architecture summary from GitNexus, optionally enriched by UA.
 - `project/<id>/hotspots`: risk areas with evidence and required action.
+- `project/<id>/code-context`: current Code Context summary and artifact pointers.
+- `project/<id>/quality-gates`: current quality gate state.
+- `project/<id>/handoff`: next-agent and next-recipe handoff summary.
 - `artifact/<id>/impact-analysis/<run-id>`: GitNexus detect-changes and impact summary.
 
-Raw indexes stay local. gbrain receives summaries, decisions, gates, and handoff notes.
+Use `node scripts/ai-context-bridge.mjs sync-gbrain --dry-run` to preview writes, then `node scripts/ai-context-bridge.mjs sync-gbrain` to write project summaries. Raw indexes stay local. gbrain receives summaries, decisions, gates, and handoff notes.

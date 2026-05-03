@@ -29,10 +29,10 @@ gbrain = 长期事实源
 5. 读取 SYSTEM_TUNING_LOOP.md
 6. 读取 MEMORY_ARCHITECTURE.md
 7. 读取 GBRAIN_SCHEMA.md
-8. 查询 gbrain 相关记忆
+8. 读取 gbrain 项目核心页：project/<id>/overview、state、foundation-readiness、code-context、quality-gates、gitnexus-index、architecture、hotspots、handoff
 9. 读取 gstack native logs
 10. 检查 git status / diff / branch / commit
-11. 检查 .ai-context/project.json 和 GitNexus status；如需可视化/onboarding/domain/fallback，再检查 .understand-anything artifacts
+11. 检查 .ai-context/project.json 和 GitNexus status；如 gbrain 项目页缺失或 stale，先运行 node scripts/ai-context-bridge.mjs sync-gbrain --dry-run，再运行 node scripts/ai-context-bridge.mjs sync-gbrain；如需可视化/onboarding/domain/fallback，再检查 .understand-anything artifacts
 12. 判断 Foundation Readiness 是否 known + ready
 ```
 
@@ -45,6 +45,20 @@ gbrain query "project $PROJECT_ID code context gitnexus reading path hotspots"
 gbrain query "agent capability gaps active"
 gbrain query "memory policy gbrain local docs conflict"
 gbrain query "foundation readiness active blockers"
+```
+
+推荐直接读取的 project pages：
+
+```bash
+for page in overview state foundation-readiness code-context quality-gates gitnexus-index architecture hotspots handoff; do
+  gbrain get "project/$PROJECT_ID/$page"
+done
+```
+
+如果 `gitnexus-index`、`architecture`、`hotspots` 或 `handoff` 缺失，或者 `gitnexus-index` 不包含当前 `.ai-context/gitnexus-status.json` 的 indexed commit：
+
+```bash
+node scripts/ai-context-bridge.mjs sync-gbrain
 ```
 
 如果 gbrain query 遇到 PGLite lock、timeout 或临时失败：
@@ -186,6 +200,13 @@ artifact paths
 blockers
 next recommended action
 system tuning notes
+```
+
+如果本轮更新了稳定的状态、质量门禁、Code Context 或 handoff 摘要，先预览再同步项目级 gbrain 页面：
+
+```bash
+node scripts/ai-context-bridge.mjs sync-gbrain --dry-run
+node scripts/ai-context-bridge.mjs sync-gbrain
 ```
 
 然后记录结构化 usage run：

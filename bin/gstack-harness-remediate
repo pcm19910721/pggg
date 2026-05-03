@@ -11,7 +11,8 @@ Usage:
 Scope:
   - Creates missing harness directories and protocol placeholders.
   - Restores harness-owned bridge/recorder files from the template source when available.
-  - Runs scripts/ai-context-bridge.mjs status to refresh Code Context artifacts.
+  - Runs scripts/ai-context-bridge.mjs sync-gbrain when possible to refresh
+    Code Context artifacts and project-scoped gbrain memory pages.
   - Updates docs/FOUNDATION_REMEDIATION_REPORT.md and .gstack/project-state.json.
   - Records a structured usage run when the recorder is available.
 
@@ -338,12 +339,14 @@ seed_gbrain_page() {
     return 0
   fi
   local gbrain_rc
-  if timeout 8s gbrain put "$slug" <<EOF >/dev/null 2>&1
+  local content
+  content="$(cat <<EOF
 # $title
 
 $body
 EOF
-  then
+)"
+  if timeout 8s env -u OPENAI_API_KEY GBRAIN_NO_AUTO_HOOKS=1 gbrain put "$slug" --content "$content" --no-embed --no-auto-hooks >/dev/null 2>&1; then
     timeout 4s gbrain tag "$slug" scope:project >/dev/null 2>&1 || true
     timeout 4s gbrain tag "$slug" "project:$PROJECT_ID" >/dev/null 2>&1 || true
     record_action "seed_gbrain_page" "$slug" "seeded core gbrain page"
@@ -368,11 +371,18 @@ seed_gbrain_page "project/$PROJECT_ID/quality-gates" "Quality Gates: $PROJECT_ID
 
 if [ "$SKIP_CODE_CONTEXT" -ne 1 ] && [ -f "$TARGET_DIR/scripts/ai-context-bridge.mjs" ] && [ -f "$TARGET_DIR/.ai-context/project.json" ]; then
   if [ "$DRY_RUN" -eq 1 ]; then
-    log "DRY_RUN node scripts/ai-context-bridge.mjs status"
+    log "DRY_RUN node scripts/ai-context-bridge.mjs sync-gbrain"
+  elif command -v gbrain >/dev/null 2>&1 && gbrain --version >/dev/null 2>&1 && (cd "$TARGET_DIR" && node scripts/ai-context-bridge.mjs sync-gbrain > "$TMP_DIR/sync-gbrain.out" 2> "$TMP_DIR/sync-gbrain.err"); then
+    record_action "sync_gbrain_project_memory" "project/$PROJECT_ID" "ran GitNexus bridge sync-gbrain"
+    record_file "docs/CODE_CONTEXT_REPORT.md" "refreshed by bridge sync-gbrain"
+    record_file ".ai-context/gitnexus-status.json" "refreshed by bridge sync-gbrain"
+    record_file ".ai-context/gitnexus-index.json" "refreshed by bridge sync-gbrain"
+    record_file ".ai-context/gitnexus-index.md" "refreshed by bridge sync-gbrain"
   elif (cd "$TARGET_DIR" && node scripts/ai-context-bridge.mjs status > "$TMP_DIR/code-context-status.out" 2> "$TMP_DIR/code-context-status.err"); then
     record_action "refresh_code_context_status" "docs/CODE_CONTEXT_REPORT.md" "ran GitNexus bridge status"
     record_file "docs/CODE_CONTEXT_REPORT.md" "refreshed by bridge status"
     record_file ".ai-context/gitnexus-status.json" "refreshed by bridge status"
+    record_warning "gbrain_project_memory_sync_failed"
   else
     record_warning "code_context_status_failed"
   fi
@@ -475,6 +485,9 @@ const transientWarnings = new Set([
   'code_context_status_failed',
   'gbrain_seed_failed',
   'gbrain_seed_timeout',
+  'gbrain_project_memory_missing',
+  'gbrain_project_memory_stale',
+  'gbrain_project_memory_sync_failed',
 ]);
 const existingWarnings = (Array.isArray(state.warnings) ? state.warnings : [])
   .filter((warning) => !transientWarnings.has(String(warning)));
@@ -495,6 +508,9 @@ if (hardBlockers.length) {
   warnings.includes('code_context_status_failed') ||
   warnings.includes('gbrain_seed_failed') ||
   warnings.includes('gbrain_seed_timeout') ||
+  warnings.includes('gbrain_project_memory_missing') ||
+  warnings.includes('gbrain_project_memory_stale') ||
+  warnings.includes('gbrain_project_memory_sync_failed') ||
   warnings.includes('gbrain_core_pages_missing')
 ) {
   remediationStatus = 'partial';

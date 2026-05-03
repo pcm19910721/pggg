@@ -3,11 +3,23 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 
 const ROOT = process.cwd();
 const CONFIG_PATH = path.join(ROOT, '.ai-context', 'project.json');
 const START = '<!-- project-context-bridge:start -->';
 const END = '<!-- project-context-bridge:end -->';
+const DEFAULT_SYNC_GBRAIN_KEYS = [
+  'overview',
+  'state',
+  'foundation_readiness',
+  'code_context',
+  'quality_gates',
+  'gitnexus_index',
+  'architecture',
+  'hotspots',
+  'handoff',
+];
 
 function slugify(value) {
   return String(value || 'project')
@@ -47,9 +59,11 @@ function run(command, args, opts = {}) {
   const result = spawnSync(command, args, {
     cwd: opts.cwd || ROOT,
     encoding: 'utf-8',
+    env: opts.env || process.env,
     input: opts.input,
     maxBuffer: 256 * 1024 * 1024,
     shell: false,
+    timeout: opts.timeoutMs,
   });
   return {
     ok: result.status === 0,
@@ -136,6 +150,8 @@ function defaultConfig(repoPath, projectId) {
       pages: {
         overview: `project/${id}/overview`,
         state: `project/${id}/state`,
+        foundation_readiness: `project/${id}/foundation-readiness`,
+        code_context: `project/${id}/code-context`,
         architecture: `project/${id}/architecture`,
         decisions: `project/${id}/decisions`,
         assumptions: `project/${id}/assumptions`,
@@ -190,6 +206,8 @@ Before code work:
 2. Read the gbrain pages listed under \`gbrain.pages\` when available.
 3. Run \`node scripts/ai-context-bridge.mjs status\`.
 4. Refresh GitNexus when stale and graph accuracy matters: \`node scripts/ai-context-bridge.mjs refresh\`.
+5. Preview durable memory writes before handoff: \`node scripts/ai-context-bridge.mjs sync-gbrain --dry-run\`.
+6. Sync durable project memory after readiness, refresh, or handoff changes: \`node scripts/ai-context-bridge.mjs sync-gbrain\`.
 
 Use GitNexus for current code facts: source symbols, calls, imports, execution flows, context, impact, and detect-changes.
 Use gbrain for durable memory: decisions, state, assumptions, quality gates, hotspots, and handoff notes.
@@ -201,12 +219,19 @@ Before finishing code work, run:
 
 \`\`\`bash
 node scripts/ai-context-bridge.mjs postchange --scope all
+node scripts/ai-context-bridge.mjs sync-gbrain
 \`\`\`
 
 For high-risk edits, add explicit impact targets:
 
 \`\`\`bash
 node scripts/ai-context-bridge.mjs postchange --scope all --impact SymbolName
+\`\`\`
+
+After stable state/report updates, write concise summaries to gbrain:
+
+\`\`\`bash
+node scripts/ai-context-bridge.mjs sync-gbrain
 \`\`\`
 ${END}`;
 
@@ -294,12 +319,58 @@ function summarizeMeta(config, meta, metaPath) {
   };
 }
 
+function pageSlugs(config) {
+  const id = slugify(config.project_id || path.basename(config.repo_path || ROOT));
+  return {
+    overview: `project/${id}/overview`,
+    state: `project/${id}/state`,
+    foundation_readiness: `project/${id}/foundation-readiness`,
+    code_context: `project/${id}/code-context`,
+    quality_gates: `project/${id}/quality-gates`,
+    gitnexus_index: `project/${id}/gitnexus-index`,
+    architecture: `project/${id}/architecture`,
+    hotspots: `project/${id}/hotspots`,
+    handoff: `project/${id}/handoff`,
+    decisions: `project/${id}/decisions`,
+    assumptions: `project/${id}/assumptions`,
+    ...(config.gbrain?.pages || {}),
+  };
+}
+
+function projectUid(config, summary = {}) {
+  const stableKey = summary.remote_url || summary.repo_path || config.repo_path || config.project_id;
+  return createHash('sha256').update(String(stableKey)).digest('hex').slice(0, 16);
+}
+
+function yamlScalar(value) {
+  return JSON.stringify(String(value ?? ''));
+}
+
+function frontmatter(type, config, summary, extra = {}) {
+  const fields = {
+    type,
+    project: config.project_id,
+    project_uid: projectUid(config, summary),
+    repo_path: summary.repo_path || config.repo_path || '',
+    remote_url: summary.remote_url || '',
+    git_head: summary.git_head || '',
+    indexed_commit: summary.last_commit || '',
+    indexed_at: summary.indexed_at || '',
+    generated_at: new Date().toISOString(),
+    ...extra,
+  };
+  const lines = Object.entries(fields).map(([key, value]) => `${key}: ${yamlScalar(value)}`);
+  lines.push(`tags: ["scope:project", "project:${config.project_id}", "project_uid:${fields.project_uid}", "type:${type}", "source:artifact", "status:active"]`);
+  return `---\n${lines.join('\n')}\n---`;
+}
+
 function markdownIndexPage(config, summary) {
   const stats = summary.stats || {};
   const vector = summary.capabilities?.vectorSearch || {};
   return `---
 type: gitnexus_index
 project: ${config.project_id}
+project_uid: ${projectUid(config, summary)}
 repo_path: ${summary.repo_path}
 gitnexus_repo: ${summary.gitnexus_repo}
 remote_url: ${summary.remote_url || ''}
@@ -344,8 +415,24 @@ Understand Anything artifacts are optional and should stay local unless summariz
 `;
 }
 
-function writeGbrain(slug, markdown) {
-  return run('gbrain', ['put', slug], { input: markdown });
+function gbrainEnv() {
+  const env = { ...process.env };
+  delete env.OPENAI_API_KEY;
+  return env;
+}
+
+function writeGbrain(slug, markdown, opts = {}) {
+  return run('gbrain', ['put', slug, '--content', markdown, '--no-embed', '--no-auto-hooks'], {
+    env: opts.noEmbed === false ? process.env : gbrainEnv(),
+    timeoutMs: opts.timeoutMs || 30000,
+  });
+}
+
+function getGbrain(slug, opts = {}) {
+  return run('gbrain', ['get', slug], {
+    env: process.env,
+    timeoutMs: opts.timeoutMs || 8000,
+  });
 }
 
 function commandExists(command) {
@@ -514,6 +601,389 @@ async function updateCodeContextArtifacts(config, summary, operation, details = 
   await updateProjectStateMarkdown(status);
 }
 
+async function readTextIfExists(filePath) {
+  try {
+    return await fs.readFile(filePath, 'utf-8');
+  } catch {
+    return '';
+  }
+}
+
+function listItems(items) {
+  const clean = (items || []).filter(Boolean);
+  return clean.length ? clean.map((item) => `- ${item}`).join('\n') : '- None';
+}
+
+function objectLines(object) {
+  const entries = Object.entries(object || {}).filter(([, value]) => value !== undefined && value !== null && value !== '');
+  return entries.length ? entries.map(([key, value]) => `- ${key}: ${value}`).join('\n') : '- None';
+}
+
+function runtimeLines(runtime = {}) {
+  return objectLines({
+    install: runtime.install,
+    dev: runtime.dev,
+    test: runtime.test,
+    lint: runtime.lint,
+    typecheck: runtime.typecheck,
+    local_url: runtime.local_url,
+    production_url: runtime.production_url,
+  });
+}
+
+function reportVerdict(text, fallback = 'unknown') {
+  const status = text.match(/^Status:\s*(\S+)/m);
+  if (status) return status[1];
+  const verdict = text.match(/^Verdict:\s*(\S+)/m);
+  if (verdict) return verdict[1];
+  return fallback;
+}
+
+function shortReportExcerpt(text, maxLines = 40) {
+  if (!text.trim()) return '(report missing)';
+  return text.split(/\r?\n/).slice(0, maxLines).join('\n').trim();
+}
+
+async function projectMemoryInputs(config, summary) {
+  const state = await readJson(path.join(ROOT, '.gstack', 'project-state.json'), {});
+  const readiness = await readTextIfExists(path.join(ROOT, 'docs', 'FOUNDATION_READINESS_REPORT.md'));
+  const remediation = await readTextIfExists(path.join(ROOT, 'docs', 'FOUNDATION_REMEDIATION_REPORT.md'));
+  const codeContext = await readTextIfExists(path.join(ROOT, 'docs', 'CODE_CONTEXT_REPORT.md'));
+  const projectState = await readTextIfExists(path.join(ROOT, 'PROJECT_STATE.md'));
+  return { config, summary, state, readiness, remediation, codeContext, projectState };
+}
+
+function markdownOverviewPage(input) {
+  const { config, summary, state } = input;
+  return `${frontmatter('project_overview', config, summary)}
+
+# Project Overview: ${config.project_id}
+
+## Identity
+
+- Project ID: ${config.project_id}
+- Project UID: ${projectUid(config, summary)}
+- Repo path: ${summary.repo_path || config.repo_path}
+- Remote URL: ${summary.remote_url || 'local-only'}
+- Branch: ${summary.branch}
+- Git HEAD: ${summary.git_head || 'unknown'}
+- GitNexus repo: ${summary.gitnexus_repo}
+
+## Current Posture
+
+- Foundation readiness: ${state.foundation?.readiness || state.quality_gates?.foundation_readiness || 'unknown'}
+- gbrain: ${state.foundation?.gbrain || 'unknown'}
+- gbrain query: ${state.foundation?.gbrain_query || 'unknown'}
+- Code Context: ${state.quality_gates?.code_context || codeContextStatus(summary)}
+- Next agent: ${state.next_recommended_agent || 'Orchestrator'}
+- Next recipe: ${state.next_recommended_recipe || 'R0 Restore / Resume Context'}
+
+## Runtime Commands
+
+${runtimeLines(state.runtime)}
+
+## Memory Policy
+
+GitNexus keeps the detailed local code graph in \`.gitnexus/\`. gbrain stores durable summaries, state, gates, decisions, hotspots, and handoff notes under this project namespace.
+`;
+}
+
+function markdownStatePage(input) {
+  const { config, summary, state, projectState } = input;
+  return `${frontmatter('project_state', config, summary)}
+
+# Project State: ${config.project_id}
+
+## Machine State
+
+- Phase: ${state.phase || 'unknown'}
+- Last completed agent: ${state.last_completed_agent || 'unknown'}
+- Next recommended agent: ${state.next_recommended_agent || 'Orchestrator'}
+- Next recommended recipe: ${state.next_recommended_recipe || 'R0 Restore / Resume Context'}
+- Problem handling required: ${state.problem_handling_required ? 'yes' : 'no'}
+
+## Blockers
+
+${listItems(state.blockers || [])}
+
+## Warnings
+
+${listItems(state.warnings || [])}
+
+## Local Source
+
+The machine-readable source of truth is \`.gstack/project-state.json\`; human-readable state is \`PROJECT_STATE.md\`.
+
+## PROJECT_STATE.md Excerpt
+
+\`\`\`markdown
+${shortReportExcerpt(projectState, 60)}
+\`\`\`
+`;
+}
+
+function markdownFoundationPage(input) {
+  const { config, summary, state, readiness, remediation } = input;
+  return `${frontmatter('foundation_readiness', config, summary)}
+
+# Foundation Readiness: ${config.project_id}
+
+## Summary
+
+- Readiness: ${state.foundation?.readiness || reportVerdict(readiness)}
+- gbrain: ${state.foundation?.gbrain || 'unknown'}
+- gbrain query: ${state.foundation?.gbrain_query || 'unknown'}
+- runtime: ${state.foundation?.runtime || 'unknown'}
+- runners: ${state.foundation?.runners || 'unknown'}
+- remediation: ${state.foundation?.remediation || reportVerdict(remediation, 'unknown')}
+
+## Blockers
+
+${listItems(state.blockers || [])}
+
+## Warnings
+
+${listItems(state.warnings || [])}
+
+## Latest Readiness Report
+
+\`\`\`markdown
+${shortReportExcerpt(readiness, 80)}
+\`\`\`
+`;
+}
+
+function markdownCodeContextPage(input) {
+  const { config, summary, state, codeContext } = input;
+  const stats = summary.stats || {};
+  return `${frontmatter('code_context', config, summary)}
+
+# Code Context: ${config.project_id}
+
+## Summary
+
+- Provider: GitNexus
+- Status: ${state.quality_gates?.code_context || codeContextStatus(summary)}
+- Indexed: ${summary.indexed ? 'yes' : 'no'}
+- Stale: ${summary.stale ? 'yes' : 'no'}
+- Git HEAD: ${summary.git_head || 'unknown'}
+- Indexed commit: ${summary.last_commit || 'not indexed'}
+- Indexed at: ${summary.indexed_at || 'not indexed'}
+- Files: ${stats.files ?? 'unknown'}
+- Nodes: ${stats.nodes ?? 'unknown'}
+- Edges: ${stats.edges ?? 'unknown'}
+
+## Reuse Path
+
+Use GitNexus query/context/impact for current code facts. Use these gbrain pages for durable project memory and handoff context.
+
+## Latest Code Context Report
+
+\`\`\`markdown
+${shortReportExcerpt(codeContext, 80)}
+\`\`\`
+`;
+}
+
+function markdownQualityGatesPage(input) {
+  const { config, summary, state } = input;
+  return `${frontmatter('quality_gates', config, summary)}
+
+# Quality Gates: ${config.project_id}
+
+## Gates
+
+${objectLines(state.quality_gates || {})}
+
+## Runtime
+
+${runtimeLines(state.runtime)}
+
+## Required Before Finish
+
+${listItems(state.quality_gates?.must_run_before_finish || config.quality_gates?.must_run_before_finish || [])}
+`;
+}
+
+function markdownArchitecturePage(input) {
+  const { config, summary } = input;
+  const stats = summary.stats || {};
+  return `${frontmatter('architecture', config, summary)}
+
+# Architecture: ${config.project_id}
+
+## Current Source
+
+This page is generated from GitNexus index metadata and is intentionally concise. Use GitNexus query/context for live symbol, import, call, and execution-flow detail.
+
+## Index Shape
+
+- Files: ${stats.files ?? 'unknown'}
+- Nodes: ${stats.nodes ?? 'unknown'}
+- Edges: ${stats.edges ?? 'unknown'}
+- Communities: ${stats.communities ?? 'unknown'}
+- Processes: ${stats.processes ?? 'unknown'}
+- Embeddings: ${stats.embeddings ?? 'unknown'}
+
+## Recommended Reading Path
+
+1. Read \`.ai-context/project.json\` and \`docs/CODE_CONTEXT_REPORT.md\`.
+2. Query GitNexus for entry points, core flows, and task-specific symbols.
+3. Use \`project/${config.project_id}/hotspots\` and \`project/${config.project_id}/handoff\` before code changes.
+`;
+}
+
+function markdownHotspotsPage(input) {
+  const { config, summary, state } = input;
+  const hotspots = [];
+  if (summary.stale) hotspots.push('GitNexus index is stale; refresh before impact-sensitive work.');
+  if (!summary.indexed) hotspots.push('GitNexus index is missing; run bridge refresh before relying on code graph facts.');
+  for (const blocker of state.blockers || []) hotspots.push(`Blocker: ${blocker}`);
+  for (const warning of state.warnings || []) hotspots.push(`Warning: ${warning}`);
+  if (!state.runtime?.test || state.runtime.test === 'not_required') {
+    hotspots.push('No executable test command is recorded for this project mode.');
+  }
+
+  return `${frontmatter('hotspots', config, summary)}
+
+# Hotspots: ${config.project_id}
+
+## Current Risks
+
+${listItems(hotspots)}
+
+## How To Recheck
+
+- Foundation: \`.gstack/harness/bin/gstack-harness-readiness --target .\`
+- Code context: \`node scripts/ai-context-bridge.mjs status\`
+- Full memory sync: \`node scripts/ai-context-bridge.mjs sync-gbrain\`
+`;
+}
+
+function markdownHandoffPage(input) {
+  const { config, summary, state } = input;
+  return `${frontmatter('handoff', config, summary)}
+
+# Handoff: ${config.project_id}
+
+## Next Step
+
+- Next agent: ${state.next_recommended_agent || 'Orchestrator'}
+- Next recipe: ${state.next_recommended_recipe || 'R0 Restore / Resume Context'}
+- Foundation readiness: ${state.foundation?.readiness || 'unknown'}
+- Code Context: ${state.quality_gates?.code_context || codeContextStatus(summary)}
+
+## Start Commands
+
+\`\`\`bash
+.gstack/harness/bin/gstack-harness-readiness --target .
+node scripts/ai-context-bridge.mjs status
+node scripts/ai-context-bridge.mjs sync-gbrain
+\`\`\`
+
+## Notes
+
+Read local state first, then use project-scoped gbrain pages as durable memory. Use GitNexus for current code facts before product, build, review, release, or incident decisions.
+`;
+}
+
+function markdownDecisionsPage(input) {
+  const { config, summary } = input;
+  return `${frontmatter('decisions', config, summary)}
+
+# Decisions: ${config.project_id}
+
+## Standing Decisions
+
+- GitNexus is the current code-fact layer.
+- gbrain stores durable summaries, state, gates, decisions, and handoff notes.
+- Raw \`.gitnexus/\`, source code, and full graph exports stay local.
+- Project memory pages use \`project/${config.project_id}/...\` plus \`project_uid:${projectUid(config, summary)}\` tags to avoid cross-project mixing.
+`;
+}
+
+function markdownAssumptionsPage(input) {
+  const { config, summary } = input;
+  return `${frontmatter('assumptions', config, summary)}
+
+# Assumptions: ${config.project_id}
+
+## Current Assumptions
+
+- The project namespace is \`project/${config.project_id}\`.
+- The project UID is derived from the remote URL when present, otherwise from the local repo path.
+- gbrain writes from the bridge disable real-time OpenAI embedding so the harness is not blocked by external embedding latency.
+- Detailed code graph queries should be answered by GitNexus, not by importing raw graph data into gbrain.
+`;
+}
+
+function projectMemoryPages(config, summary, input) {
+  const slugs = pageSlugs(config);
+  return [
+    ['overview', slugs.overview, markdownOverviewPage(input)],
+    ['state', slugs.state, markdownStatePage(input)],
+    ['foundation_readiness', slugs.foundation_readiness, markdownFoundationPage(input)],
+    ['code_context', slugs.code_context, markdownCodeContextPage(input)],
+    ['quality_gates', slugs.quality_gates, markdownQualityGatesPage(input)],
+    ['gitnexus_index', slugs.gitnexus_index, markdownIndexPage(config, summary)],
+    ['architecture', slugs.architecture, markdownArchitecturePage(input)],
+    ['hotspots', slugs.hotspots, markdownHotspotsPage(input)],
+    ['handoff', slugs.handoff, markdownHandoffPage(input)],
+    ['decisions', slugs.decisions, markdownDecisionsPage(input)],
+    ['assumptions', slugs.assumptions, markdownAssumptionsPage(input)],
+  ].filter(([, slug]) => Boolean(slug));
+}
+
+function selectProjectMemoryPages(pages, args = {}) {
+  const available = pages.map(([key]) => key);
+  const requested = args.page
+    ? (Array.isArray(args.page) ? args.page : [args.page])
+    : DEFAULT_SYNC_GBRAIN_KEYS;
+  const selected = requested.includes('all') ? available : requested;
+  const unknown = selected.filter((key) => !available.includes(key));
+  if (unknown.length) {
+    throw new Error(`Unknown sync-gbrain page: ${unknown.join(', ')}. Available: ${available.join(', ')}, all`);
+  }
+  return pages.filter(([key]) => selected.includes(key));
+}
+
+function frontmatterValue(markdown, key) {
+  const match = markdown.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) return '';
+  const line = match[1].split(/\r?\n/).find((item) => item.startsWith(`${key}:`));
+  if (!line) return '';
+  const raw = line.slice(key.length + 1).trim();
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw.replace(/^['"]|['"]$/g, '');
+  }
+}
+
+function samePath(a, b) {
+  if (!a || !b) return false;
+  return path.resolve(String(a)) === path.resolve(String(b));
+}
+
+async function assertNoProjectCollision(config, summary, slugs) {
+  const overview = slugs.overview;
+  if (!overview) return;
+  const existing = getGbrain(overview);
+  if (!existing.ok || !existing.stdout.trim()) return;
+
+  const expectedUid = projectUid(config, summary);
+  const existingUid = frontmatterValue(existing.stdout, 'project_uid');
+  if (existingUid && existingUid !== expectedUid) {
+    throw new Error(`gbrain project collision for ${overview}: existing project_uid ${existingUid} differs from ${expectedUid}`);
+  }
+
+  const existingPath = frontmatterValue(existing.stdout, 'repo_path')
+    || (existing.stdout.match(/Target path:\s*(.+)/i)?.[1] || '').trim();
+  if (!existingUid && existingPath && !samePath(existingPath, summary.repo_path || config.repo_path)) {
+    throw new Error(`gbrain project collision for ${overview}: existing repo_path ${existingPath} differs from ${summary.repo_path || config.repo_path}`);
+  }
+}
+
 async function commandStatus() {
   const config = await loadConfig();
   const { metaPath, meta } = await readGitNexusMeta(config);
@@ -574,6 +1044,74 @@ async function commandRefresh(args) {
   }
 
   console.log(JSON.stringify(summary, null, 2));
+}
+
+async function commandSyncGbrain(args = {}) {
+  const config = await loadConfig();
+  const { metaPath, meta } = await readGitNexusMeta(config);
+  const summary = summarizeMeta(config, meta, metaPath);
+  const markdown = markdownIndexPage(config, summary);
+
+  if (!args.dryRun) {
+    const gbrainVersion = commandExists('gbrain')
+      ? run('gbrain', ['--version'], { timeoutMs: 8000 })
+      : { ok: false, status: 127, stdout: '', stderr: 'gbrain command not found' };
+    if (!gbrainVersion.ok) {
+      process.stderr.write(gbrainVersion.stderr || gbrainVersion.stdout || 'gbrain command not available\n');
+      throw new Error('gbrain is not available');
+    }
+
+    await writeJson(path.join(ROOT, '.ai-context', 'gitnexus-status.json'), summary);
+    await writeJson(path.join(ROOT, '.ai-context', 'gitnexus-index.json'), summary);
+    await fs.writeFile(path.join(ROOT, '.ai-context', 'gitnexus-index.md'), markdown, 'utf-8');
+    await updateCodeContextArtifacts(config, summary, 'sync-gbrain');
+  }
+
+  const slugs = pageSlugs(config);
+  if (!args.dryRun) await assertNoProjectCollision(config, summary, slugs);
+
+  const input = await projectMemoryInputs(config, summary);
+  const pages = selectProjectMemoryPages(projectMemoryPages(config, summary, input), args);
+  const uid = projectUid(config, summary);
+  const written = [];
+
+  for (const [key, slug, content] of pages) {
+    if (args.dryRun) {
+      written.push({ key, slug, dry_run: true });
+      continue;
+    }
+    const result = writeGbrain(slug, content, { timeoutMs: 30000 });
+    if (!result.ok) {
+      process.stderr.write(result.stdout);
+      process.stderr.write(result.stderr);
+      throw new Error(`gbrain put failed for ${slug}`);
+    }
+    written.push({ key, slug });
+  }
+
+  console.log(JSON.stringify({
+    event: 'sync_gbrain',
+    status: args.dryRun ? 'planned' : 'synced',
+    project_id: config.project_id,
+    project_uid: uid,
+    dry_run: Boolean(args.dryRun),
+    repo_path: summary.repo_path,
+    remote_url: summary.remote_url,
+    git_head: summary.git_head,
+    indexed_commit: summary.last_commit,
+    indexed_at: summary.indexed_at,
+    stale: summary.stale,
+    pages_selected: pages.map(([key, slug]) => ({ key, slug })),
+    pages_written: args.dryRun ? [] : written,
+    pages_planned: args.dryRun ? written : [],
+    tag_failures: [],
+    artifacts: {
+      status: '.ai-context/gitnexus-status.json',
+      index_json: '.ai-context/gitnexus-index.json',
+      index_markdown: '.ai-context/gitnexus-index.md',
+      code_context_report: 'docs/CODE_CONTEXT_REPORT.md',
+    },
+  }, null, 2));
 }
 
 function runId() {
@@ -728,6 +1266,7 @@ function usage() {
   node scripts/ai-context-bridge.mjs init [--project-id id] [--repo path] [--gitnexus-repo name] [--base-branch main]
   node scripts/ai-context-bridge.mjs status
   node scripts/ai-context-bridge.mjs refresh [--skip-analyze] [--no-embeddings] [--write-gbrain]
+  node scripts/ai-context-bridge.mjs sync-gbrain [--dry-run] [--page overview|state|foundation_readiness|code_context|quality_gates|gitnexus_index|architecture|hotspots|handoff|decisions|assumptions|all]
   node scripts/ai-context-bridge.mjs postchange [--scope all|staged|unstaged|compare] [--base-ref main] [--impact Symbol] [--write-gbrain]
 `);
 }
@@ -745,6 +1284,9 @@ async function main() {
         break;
       case 'refresh':
         await commandRefresh(args);
+        break;
+      case 'sync-gbrain':
+        await commandSyncGbrain(args);
         break;
       case 'postchange':
         await commandPostchange(args);

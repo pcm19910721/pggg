@@ -75,13 +75,54 @@ case "${1:-}" in
       printf 'project/%s/foundation-readiness\n' "$project"
       printf 'project/%s/code-context\n' "$project"
       printf 'project/%s/quality-gates\n' "$project"
+      printf 'project/%s/gitnexus-index\n' "$project"
+      printf 'project/%s/architecture\n' "$project"
+      printf 'project/%s/hotspots\n' "$project"
+      printf 'project/%s/handoff\n' "$project"
     done
+    if [ -n "${GBRAIN_STORE_PATH:-}" ] && [ -f "$GBRAIN_STORE_PATH" ]; then
+      cat "$GBRAIN_STORE_PATH"
+    fi
     printf 'system/orchestration-principles\n'
+    ;;
+  get)
+    slug="${2:-}"
+    case "$slug" in
+      project/install/*|project/preserve/*|project/indexed/*|project/runtime/*)
+        if [ -n "${GBRAIN_STORE_PATH:-}" ] && [ -f "$GBRAIN_STORE_PATH" ] && grep -Fxq "$slug" "$GBRAIN_STORE_PATH"; then
+          printf '# %s\n' "$slug"
+        fi
+        ;;
+      *)
+        if [ -n "${GBRAIN_STORE_PATH:-}" ] && [ -f "$GBRAIN_STORE_PATH" ] && grep -Fxq "$slug" "$GBRAIN_STORE_PATH"; then
+          printf '# %s\n' "$slug"
+        else
+          exit 1
+        fi
+        ;;
+    esac
     ;;
   query)
     printf 'query completed\n'
     ;;
-  put|tag)
+  put)
+    slug="${2:-}"
+    if [ -n "${GBRAIN_LOG_PATH:-}" ]; then
+      printf 'put\t%s\n' "$slug" >> "$GBRAIN_LOG_PATH"
+    fi
+    if [ -n "${GBRAIN_STORE_PATH:-}" ]; then
+      touch "$GBRAIN_STORE_PATH"
+      if ! grep -Fxq "$slug" "$GBRAIN_STORE_PATH"; then
+        printf '%s\n' "$slug" >> "$GBRAIN_STORE_PATH"
+      fi
+    fi
+    cat >/dev/null
+    exit 0
+    ;;
+  tag)
+    if [ -n "${GBRAIN_LOG_PATH:-}" ]; then
+      printf 'tag\t%s\t%s\n' "${2:-}" "${3:-}" >> "$GBRAIN_LOG_PATH"
+    fi
     exit 0
     ;;
   *)
@@ -160,6 +201,7 @@ test_fresh_install() {
   assert_contains "$INSTALL_DIR/docs/CODEX_START_PROMPT.md" "Problem Handling Agent"
   assert_contains "$INSTALL_DIR/docs/CODEX_START_PROMPT.md" "docs/CODE_CONTEXT_REPORT.md"
   assert_contains "$INSTALL_DIR/docs/CODE_CONTEXT_REPORT.md" "gbrain_write_candidates"
+  assert_contains "$INSTALL_DIR/.ai-context/FIELD_CONTRACT.md" "sync-gbrain --dry-run"
   assert_contains "$INSTALL_DIR/docs/CODE_CONTEXT_REPORT.md" "project/"
   assert_contains "$INSTALL_DIR/docs/CODE_CONTEXT_REPORT.md" "GitNexus"
   assert_contains "$INSTALL_DIR/docs/CODEBASE_MAP_REPORT.md" "compatibility pointer"
@@ -197,11 +239,22 @@ test_fresh_install() {
   assert_contains "$INSTALL_DIR/docs/CODE_CONTEXT_REPORT.md" "operation: status"
   assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.code_context && state.code_context.provider === 'gitnexus'" "bridge status did not update code context state"
 
-  "$INSTALL_DIR/.gstack/harness/bin/gstack-harness-remediate" --target "$INSTALL_DIR" > "$TMP_ROOT/remediate.out"
+  (cd "$INSTALL_DIR" && node scripts/ai-context-bridge.mjs sync-gbrain --dry-run --page overview --page gitnexus_index > "$TMP_ROOT/sync-gbrain-dry-run.out")
+  assert_json_field "$TMP_ROOT/sync-gbrain-dry-run.out" "state.event === 'sync_gbrain'" "sync-gbrain dry run missing event"
+  assert_json_field "$TMP_ROOT/sync-gbrain-dry-run.out" "state.status === 'planned' && state.dry_run === true" "sync-gbrain dry run did not report planned status"
+  assert_json_field "$TMP_ROOT/sync-gbrain-dry-run.out" "state.pages_planned.length === 2 && state.pages_planned.some((p) => p.slug === 'project/install/overview') && state.pages_planned.some((p) => p.slug === 'project/install/gitnexus-index')" "sync-gbrain dry run did not honor repeated --page selection"
+
+  (cd "$INSTALL_DIR" && GBRAIN_LOG_PATH="$TMP_ROOT/sync-gbrain.log" PATH="$FAKE_BIN:$PATH" node scripts/ai-context-bridge.mjs sync-gbrain --page overview --page code_context > "$TMP_ROOT/sync-gbrain.out")
+  assert_json_field "$TMP_ROOT/sync-gbrain.out" "state.event === 'sync_gbrain' && state.status === 'synced'" "sync-gbrain did not emit synced JSON"
+  assert_json_field "$TMP_ROOT/sync-gbrain.out" "state.pages_written.length === 2 && state.pages_written.some((p) => p.slug === 'project/install/code-context')" "sync-gbrain did not write selected pages"
+  assert_contains "$TMP_ROOT/sync-gbrain.log" $'put\tproject/install/overview'
+  assert_contains "$TMP_ROOT/sync-gbrain.log" $'put\tproject/install/code-context'
+
+  PATH="$FAKE_BIN:$PATH" "$INSTALL_DIR/.gstack/harness/bin/gstack-harness-remediate" --target "$INSTALL_DIR" > "$TMP_ROOT/remediate.out"
   assert_contains "$TMP_ROOT/remediate.out" "Foundation remediation status:"
   assert_contains "$INSTALL_DIR/docs/FOUNDATION_REMEDIATION_REPORT.md" "foundation_remediation:"
   assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.foundation && state.foundation.remediation" "remediation did not update foundation state"
-  "$INSTALL_DIR/.gstack/harness/bin/gstack-harness-readiness" --target "$INSTALL_DIR" > "$TMP_ROOT/readiness.out"
+  PATH="$FAKE_BIN:$PATH" "$INSTALL_DIR/.gstack/harness/bin/gstack-harness-readiness" --target "$INSTALL_DIR" > "$TMP_ROOT/readiness.out"
   assert_contains "$TMP_ROOT/readiness.out" '"status"'
 
   pass "fresh install writes protocol, agent team, pcm-harness, reports, managed block, usage run, and valid JSON"
