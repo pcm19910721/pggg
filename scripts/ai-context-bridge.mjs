@@ -1056,20 +1056,26 @@ async function commandSyncGbrain(args = {}) {
   const { metaPath, meta } = await readGitNexusMeta(config);
   const summary = summarizeMeta(config, meta, metaPath);
   const markdown = markdownIndexPage(config, summary);
+  const warnings = [];
+  const fallbacks = [];
 
   if (!args.dryRun) {
-    const gbrainVersion = commandExists('gbrain')
-      ? run('gbrain', ['--version'], { timeoutMs: 8000 })
-      : { ok: false, status: 127, stdout: '', stderr: 'gbrain command not found' };
-    if (!gbrainVersion.ok) {
-      process.stderr.write(gbrainVersion.stderr || gbrainVersion.stdout || 'gbrain command not available\n');
-      throw new Error('gbrain is not available');
-    }
-
     await writeJson(path.join(ROOT, '.ai-context', 'gitnexus-status.json'), summary);
     await writeJson(path.join(ROOT, '.ai-context', 'gitnexus-index.json'), summary);
     await fs.writeFile(path.join(ROOT, '.ai-context', 'gitnexus-index.md'), markdown, 'utf-8');
     await updateCodeContextArtifacts(config, summary, 'sync-gbrain');
+
+    const gbrainVersion = commandExists('gbrain')
+      ? run('gbrain', ['--version'], { timeoutMs: 8000 })
+      : { ok: false, status: 127, stdout: '', stderr: 'gbrain command not found' };
+    if (!gbrainVersion.ok) {
+      warnings.push('gbrain_unavailable');
+      fallbacks.push(await writeGbrainFallback(
+        'project-memory-sync',
+        markdown,
+        gbrainVersion.stderr || gbrainVersion.stdout || 'gbrain command not available',
+      ));
+    }
   }
 
   const slugs = pageSlugs(config);
@@ -1089,14 +1095,18 @@ async function commandSyncGbrain(args = {}) {
     if (!result.ok) {
       process.stderr.write(result.stdout);
       process.stderr.write(result.stderr);
-      throw new Error(`gbrain put failed for ${slug}`);
+      const fallback = await writeGbrainFallback(slug, content, result.stderr || result.stdout || `gbrain put failed for ${slug}`);
+      fallbacks.push(fallback);
+      warnings.push('gbrain_project_memory_sync_failed');
+      written.push({ key, slug, fallback, ok: false });
+      continue;
     }
-    written.push({ key, slug });
+    written.push({ key, slug, ok: true });
   }
 
   console.log(JSON.stringify({
     event: 'sync_gbrain',
-    status: args.dryRun ? 'planned' : 'synced',
+    status: args.dryRun ? 'planned' : (warnings.length ? 'fallback' : 'synced'),
     project_id: config.project_id,
     project_uid: uid,
     dry_run: Boolean(args.dryRun),
@@ -1109,6 +1119,8 @@ async function commandSyncGbrain(args = {}) {
     pages_selected: pages.map(([key, slug]) => ({ key, slug })),
     pages_written: args.dryRun ? [] : written,
     pages_planned: args.dryRun ? written : [],
+    warnings: Array.from(new Set(warnings)),
+    fallback_artifacts: fallbacks,
     tag_failures: [],
     artifacts: {
       status: '.ai-context/gitnexus-status.json',
@@ -1125,6 +1137,23 @@ function runId() {
 
 function safeFileName(value) {
   return slugify(value).slice(0, 80) || 'target';
+}
+
+async function writeGbrainFallback(slug, markdown, reason) {
+  const rel = path.join('.ai-context', 'gbrain-fallback', `${safeFileName(slug)}.md`);
+  const filePath = path.join(ROOT, rel);
+  const body = `---
+type: gbrain_fallback
+slug: ${JSON.stringify(slug)}
+reason: ${JSON.stringify(reason || 'gbrain write failed')}
+generated_at: ${JSON.stringify(new Date().toISOString())}
+---
+
+${markdown}
+`;
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, body, 'utf-8');
+  return rel;
 }
 
 function extractRisk(text) {

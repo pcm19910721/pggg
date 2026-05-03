@@ -534,12 +534,26 @@ EXISTING_PHASE=""
 EXISTING_NEXT_AGENT=""
 EXISTING_NEXT_RECIPE=""
 EXISTING_LAST_COMPLETED_AGENT=""
+EXISTING_HEALTH_GATE=""
+EXISTING_BROWSER_QA_GATE=""
+EXISTING_WINDOWS_QA_GATE=""
+EXISTING_REVIEW_GATE=""
+EXISTING_SECURITY_GATE=""
+EXISTING_PERFORMANCE_GATE=""
+EXISTING_DEPLOYMENT_GATE=""
+EXISTING_INSTALL_COMMAND=""
+EXISTING_DEV_COMMAND=""
+EXISTING_TEST_COMMAND=""
+EXISTING_LINT_COMMAND=""
+EXISTING_TYPECHECK_COMMAND=""
+EXISTING_LOCAL_URL=""
+EXISTING_PRODUCTION_URL=""
 EXISTING_PROBLEM_HANDLING_JSON="null"
 EXISTING_SYSTEM_TUNING_JSON='{"active_issue":null,"capability_gaps":[]}'
 
 if [ -f "$TARGET_DIR/.gstack/project-state.json" ] && command -v node >/dev/null 2>&1; then
-  EXISTING_STATE_INFO="$(node -e 'const fs=require("fs"); const p=process.argv[1]; const s=JSON.parse(fs.readFileSync(p,"utf8")); const vals=[s.phase||"",s.next_recommended_agent||"",s.next_recommended_recipe||"",s.last_completed_agent||""]; console.log(vals.map(v=>String(v).replace(/[\t\n\r]/g," ")).join("\t"));' "$TARGET_DIR/.gstack/project-state.json" 2>/dev/null || true)"
-  IFS=$'\t' read -r EXISTING_PHASE EXISTING_NEXT_AGENT EXISTING_NEXT_RECIPE EXISTING_LAST_COMPLETED_AGENT <<< "$EXISTING_STATE_INFO"
+  EXISTING_STATE_INFO="$(node -e 'const fs=require("fs"); const p=process.argv[1]; const s=JSON.parse(fs.readFileSync(p,"utf8")); const q=s.quality_gates||{}; const r=s.runtime||{}; const vals=[s.phase||"",s.next_recommended_agent||"",s.next_recommended_recipe||"",s.last_completed_agent||"",q.health||"",q.browser_qa||"",q.windows_qa||"",q.review||"",q.security||"",q.performance||"",q.deployment||"",r.install||"",r.dev||"",r.test||"",r.lint||"",r.typecheck||"",r.local_url||"",r.production_url||""]; console.log(vals.map(v=>String(v).replace(/[|\n\r]/g," ")).join("|"));' "$TARGET_DIR/.gstack/project-state.json" 2>/dev/null || true)"
+  IFS='|' read -r EXISTING_PHASE EXISTING_NEXT_AGENT EXISTING_NEXT_RECIPE EXISTING_LAST_COMPLETED_AGENT EXISTING_HEALTH_GATE EXISTING_BROWSER_QA_GATE EXISTING_WINDOWS_QA_GATE EXISTING_REVIEW_GATE EXISTING_SECURITY_GATE EXISTING_PERFORMANCE_GATE EXISTING_DEPLOYMENT_GATE EXISTING_INSTALL_COMMAND EXISTING_DEV_COMMAND EXISTING_TEST_COMMAND EXISTING_LINT_COMMAND EXISTING_TYPECHECK_COMMAND EXISTING_LOCAL_URL EXISTING_PRODUCTION_URL <<< "$EXISTING_STATE_INFO"
 
   while IFS= read -r existing_warning; do
     if [ -n "$existing_warning" ] && ! array_contains "$existing_warning" "${WARNINGS[@]}"; then
@@ -555,11 +569,152 @@ if [ -f "$TARGET_DIR/.gstack/project-state.json" ] && command -v node >/dev/null
 fi
 
 if [ -f "$TARGET_DIR/PROJECT_STATE.md" ]; then
-  [ -z "$EXISTING_PHASE" ] && EXISTING_PHASE="$(sed -n 's/^- Phase: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
-  [ -z "$EXISTING_LAST_COMPLETED_AGENT" ] && EXISTING_LAST_COMPLETED_AGENT="$(sed -n 's/^- Last completed agent: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
-  [ -z "$EXISTING_NEXT_AGENT" ] && EXISTING_NEXT_AGENT="$(sed -n 's/^- Next recommended agent: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
-  [ -z "$EXISTING_NEXT_RECIPE" ] && EXISTING_NEXT_RECIPE="$(sed -n 's/^- Next recommended recipe: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
+  MD_PHASE="$(sed -n 's/^- Phase: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
+  MD_LAST_COMPLETED_AGENT="$(sed -n 's/^- Last completed agent: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
+  MD_NEXT_AGENT="$(sed -n 's/^- Next recommended agent: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
+  MD_NEXT_RECIPE="$(sed -n 's/^- Next recommended recipe: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
+  MD_HEALTH_GATE="$(sed -n 's/^- Health: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
+  MD_BROWSER_QA_GATE="$(sed -n 's/^- Browser QA: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
+  MD_WINDOWS_QA_GATE="$(sed -n 's/^- Windows QA: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
+  MD_REVIEW_GATE="$(sed -n 's/^- Review: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
+  MD_SECURITY_GATE="$(sed -n 's/^- Security: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
+  MD_PERFORMANCE_GATE="$(sed -n 's/^- Performance: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
+  MD_DEPLOYMENT_GATE="$(sed -n 's/^- Deployment: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
+  MD_INSTALL_COMMAND="$(sed -n 's/^- Install command: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
+  MD_DEV_COMMAND="$(sed -n 's/^- Dev command: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
+  MD_TEST_COMMAND="$(sed -n 's/^- Test command: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
+  MD_LINT_COMMAND="$(sed -n 's/^- Lint command: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
+  MD_TYPECHECK_COMMAND="$(sed -n 's/^- Typecheck command: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
+  MD_LOCAL_URL="$(sed -n 's/^- Local URL: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
+  MD_PRODUCTION_URL="$(sed -n 's/^- Production URL: //p' "$TARGET_DIR/PROJECT_STATE.md" | head -n 1)"
+
+  [ -n "$MD_PHASE" ] && EXISTING_PHASE="$MD_PHASE"
+  [ -n "$MD_LAST_COMPLETED_AGENT" ] && EXISTING_LAST_COMPLETED_AGENT="$MD_LAST_COMPLETED_AGENT"
+  [ -n "$MD_NEXT_AGENT" ] && EXISTING_NEXT_AGENT="$MD_NEXT_AGENT"
+  [ -n "$MD_NEXT_RECIPE" ] && EXISTING_NEXT_RECIPE="$MD_NEXT_RECIPE"
+  [ -n "$MD_HEALTH_GATE" ] && EXISTING_HEALTH_GATE="$MD_HEALTH_GATE"
+  [ -n "$MD_BROWSER_QA_GATE" ] && EXISTING_BROWSER_QA_GATE="$MD_BROWSER_QA_GATE"
+  [ -n "$MD_WINDOWS_QA_GATE" ] && EXISTING_WINDOWS_QA_GATE="$MD_WINDOWS_QA_GATE"
+  [ -n "$MD_REVIEW_GATE" ] && EXISTING_REVIEW_GATE="$MD_REVIEW_GATE"
+  [ -n "$MD_SECURITY_GATE" ] && EXISTING_SECURITY_GATE="$MD_SECURITY_GATE"
+  [ -n "$MD_PERFORMANCE_GATE" ] && EXISTING_PERFORMANCE_GATE="$MD_PERFORMANCE_GATE"
+  [ -n "$MD_DEPLOYMENT_GATE" ] && EXISTING_DEPLOYMENT_GATE="$MD_DEPLOYMENT_GATE"
+  [ -n "$MD_INSTALL_COMMAND" ] && EXISTING_INSTALL_COMMAND="$MD_INSTALL_COMMAND"
+  [ -n "$MD_DEV_COMMAND" ] && EXISTING_DEV_COMMAND="$MD_DEV_COMMAND"
+  [ -n "$MD_TEST_COMMAND" ] && EXISTING_TEST_COMMAND="$MD_TEST_COMMAND"
+  [ -n "$MD_LINT_COMMAND" ] && EXISTING_LINT_COMMAND="$MD_LINT_COMMAND"
+  [ -n "$MD_TYPECHECK_COMMAND" ] && EXISTING_TYPECHECK_COMMAND="$MD_TYPECHECK_COMMAND"
+  [ -n "$MD_LOCAL_URL" ] && EXISTING_LOCAL_URL="$MD_LOCAL_URL"
+  [ -n "$MD_PRODUCTION_URL" ] && EXISTING_PRODUCTION_URL="$MD_PRODUCTION_URL"
 fi
+
+EXISTING_MARKDOWN_EVIDENCE_JSON='{}'
+if [ -f "$TARGET_DIR/PROJECT_STATE.md" ] && command -v node >/dev/null 2>&1; then
+  EXISTING_MARKDOWN_EVIDENCE_JSON="$(node - "$TARGET_DIR/PROJECT_STATE.md" <<'NODE'
+const fs = require('fs');
+const file = process.argv[2];
+let text = '';
+try {
+  text = fs.readFileSync(file, 'utf8');
+} catch {}
+
+function lineValue(label) {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = text.match(new RegExp(`^- ${escaped}:[ \\t]*(.*)$`, 'm'));
+  return match ? match[1].trim() : '';
+}
+
+function evidenceValue(section, label) {
+  const evidenceStart = text.indexOf('## Gate Evidence');
+  const evidenceText = evidenceStart === -1 ? text : text.slice(evidenceStart);
+  const start = evidenceText.indexOf(`- ${section}:`);
+  if (start === -1) return '';
+  const rest = evidenceText.slice(start);
+  const end = rest.slice(1).search(/\n- [^:\n]+:\s*$/m);
+  const block = end === -1 ? rest : rest.slice(0, end + 1);
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = block.match(new RegExp(`^[ \\t]+- ${escaped}:[ \\t]*(.*)$`, 'm'));
+  return match ? match[1].trim() : '';
+}
+
+const artifacts = {};
+const artifactLabels = {
+  qa_report: 'QA report',
+  review_report: 'Review report',
+  security_report: 'Security report',
+  performance_report: 'Performance report',
+  release_status: 'Release status',
+};
+for (const [key, label] of Object.entries(artifactLabels)) {
+  const value = lineValue(label);
+  if (value) artifacts[key] = value;
+}
+
+const gateEvidence = {};
+for (const section of ['Health', 'Browser QA', 'Review', 'Security', 'Performance']) {
+  const evidence = {};
+  for (const label of ['Command', 'URL', 'Base', 'Exit code', 'Artifact', 'Skip reason']) {
+    const value = evidenceValue(section, label);
+    if (value) evidence[label.toLowerCase().replace(/ /g, '_')] = value;
+  }
+  if (Object.keys(evidence).length) gateEvidence[section.toLowerCase().replace(/ /g, '_')] = evidence;
+}
+
+const result = {
+  phase: lineValue('Phase'),
+  goal: lineValue('Goal'),
+  last_completed_agent: lineValue('Last completed agent'),
+  quality_gates: {
+    health: lineValue('Health'),
+    browser_qa: lineValue('Browser QA'),
+    windows_qa: lineValue('Windows QA'),
+    review: lineValue('Review'),
+    security: lineValue('Security'),
+    performance: lineValue('Performance'),
+    deployment: lineValue('Deployment'),
+  },
+  runtime: {
+    install: lineValue('Install command'),
+    dev: lineValue('Dev command'),
+    test: lineValue('Test command'),
+    lint: lineValue('Lint command'),
+    typecheck: lineValue('Typecheck command'),
+    local_url: lineValue('Local URL'),
+    production_url: lineValue('Production URL'),
+  },
+  artifacts,
+  gate_evidence: gateEvidence,
+};
+process.stdout.write(JSON.stringify(result));
+NODE
+)"
+fi
+
+EXISTING_HEALTH_GATE="${EXISTING_HEALTH_GATE:-unknown}"
+EXISTING_BROWSER_QA_GATE="${EXISTING_BROWSER_QA_GATE:-not_run}"
+EXISTING_WINDOWS_QA_GATE="${EXISTING_WINDOWS_QA_GATE:-skipped}"
+EXISTING_REVIEW_GATE="${EXISTING_REVIEW_GATE:-not_run}"
+EXISTING_SECURITY_GATE="${EXISTING_SECURITY_GATE:-not_run}"
+EXISTING_PERFORMANCE_GATE="${EXISTING_PERFORMANCE_GATE:-not_run}"
+EXISTING_DEPLOYMENT_GATE="${EXISTING_DEPLOYMENT_GATE:-not_started}"
+
+preserve_runtime_value() {
+  local current="$1"
+  local existing="$2"
+  if [ -n "$existing" ] && { [ -z "$current" ] || [ "$current" = "not_required" ]; }; then
+    printf '%s\n' "$existing"
+  else
+    printf '%s\n' "$current"
+  fi
+}
+
+INSTALL_COMMAND="$(preserve_runtime_value "${INSTALL_COMMAND:-}" "$EXISTING_INSTALL_COMMAND")"
+DEV_COMMAND="$(preserve_runtime_value "${DEV_COMMAND:-}" "$EXISTING_DEV_COMMAND")"
+TEST_COMMAND="$(preserve_runtime_value "${TEST_COMMAND:-}" "$EXISTING_TEST_COMMAND")"
+LINT_COMMAND="$(preserve_runtime_value "${LINT_COMMAND:-}" "$EXISTING_LINT_COMMAND")"
+TYPECHECK_COMMAND="$(preserve_runtime_value "${TYPECHECK_COMMAND:-}" "$EXISTING_TYPECHECK_COMMAND")"
+LOCAL_URL="$(preserve_runtime_value "${LOCAL_URL:-}" "$EXISTING_LOCAL_URL")"
+PRODUCTION_URL="$(preserve_runtime_value "${PRODUCTION_URL:-}" "$EXISTING_PRODUCTION_URL")"
 
 copy_file "HARNESS_PRODUCT_USAGE.md" "HARNESS_PRODUCT_USAGE.md"
 copy_file "GSTACK_SKILL_REGISTRY.md" "GSTACK_SKILL_REGISTRY.md"
@@ -880,6 +1035,8 @@ CURRENT_PHASE="foundation"
 LAST_COMPLETED_AGENT="Foundation Readiness Agent"
 NEXT_AGENT="Orchestrator"
 NEXT_RECIPE="R0 Restore / Resume Context"
+[ -n "$EXISTING_PHASE" ] && CURRENT_PHASE="$EXISTING_PHASE"
+[ -n "$EXISTING_LAST_COMPLETED_AGENT" ] && LAST_COMPLETED_AGENT="$EXISTING_LAST_COMPLETED_AGENT"
 if [ "$FOUNDATION_VERDICT" != "ready" ]; then
   NEXT_AGENT="Foundation Remediation Agent"
   NEXT_RECIPE="R-0.5 Foundation Remediation"
@@ -887,10 +1044,8 @@ elif [ "$PROBLEM_HANDLING_REQUIRED" -eq 1 ]; then
   NEXT_AGENT="Problem Handling Agent"
   NEXT_RECIPE="Problem Handling preflight, then R0 Restore / Resume Context"
 elif [ -n "$EXISTING_PHASE" ]; then
-  CURRENT_PHASE="$EXISTING_PHASE"
   [ -n "$EXISTING_NEXT_AGENT" ] && NEXT_AGENT="$EXISTING_NEXT_AGENT"
   [ -n "$EXISTING_NEXT_RECIPE" ] && NEXT_RECIPE="$EXISTING_NEXT_RECIPE"
-  [ -n "$EXISTING_LAST_COMPLETED_AGENT" ] && LAST_COMPLETED_AGENT="$EXISTING_LAST_COMPLETED_AGENT"
 fi
 
 PROBLEM_HANDLING_STATUS_TEXT="not_needed"
@@ -945,13 +1100,13 @@ PROJECT_STATE_CONTENT="$(cat <<EOF
 
 - Foundation Readiness: $FOUNDATION_VERDICT
 - Code Context: missing
-- Health: unknown
-- Browser QA: not_run
-- Windows QA: skipped
-- Review: not_run
-- Security: not_run
-- Performance: not_run
-- Deployment: not_started
+- Health: $EXISTING_HEALTH_GATE
+- Browser QA: $EXISTING_BROWSER_QA_GATE
+- Windows QA: $EXISTING_WINDOWS_QA_GATE
+- Review: $EXISTING_REVIEW_GATE
+- Security: $EXISTING_SECURITY_GATE
+- Performance: $EXISTING_PERFORMANCE_GATE
+- Deployment: $EXISTING_DEPLOYMENT_GATE
 
 ## Gate Evidence
 
@@ -1038,6 +1193,81 @@ $WARNING_TEXT
 - Do not modify gstack skill internals from this project.
 EOF
 )"
+
+if [ -f "$TARGET_DIR/PROJECT_STATE.md" ] && command -v node >/dev/null 2>&1; then
+  PROJECT_STATE_CONTENT="$(GENERATED_PROJECT_STATE="$PROJECT_STATE_CONTENT" node - "$TARGET_DIR/PROJECT_STATE.md" <<'NODE'
+const fs = require('fs');
+const existingPath = process.argv[2];
+const generated = process.env.GENERATED_PROJECT_STATE || '';
+let existing = '';
+try {
+  existing = fs.readFileSync(existingPath, 'utf8');
+} catch {}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function generatedLine(label) {
+  const pattern = new RegExp(`^- ${escapeRegExp(label)}: .*$`, 'm');
+  return generated.match(pattern)?.[0] || null;
+}
+
+let next = existing || generated;
+const ownedLabels = [
+  'Phase',
+  'Branch',
+  'Last updated',
+  'Last completed agent',
+  'Next recommended agent',
+  'Next recommended recipe',
+  'Workspace mode',
+  'Readiness',
+  'Last readiness check',
+  'Remediation',
+  'Remediation report',
+  'gbrain',
+  'gbrain query',
+  'gstack',
+  'Project protocol',
+  'Structured state',
+  'Agent team',
+  'Problem handling',
+  'Runtime',
+  'Runners',
+  'Memory policy',
+  'Install command',
+  'Dev command',
+  'Test command',
+  'Lint command',
+  'Typecheck command',
+  'Local URL',
+  'Production URL',
+  'Foundation Readiness',
+  'Code Context',
+];
+
+for (const label of ownedLabels) {
+  const line = generatedLine(label);
+  if (!line) continue;
+  const pattern = new RegExp(`^- ${escapeRegExp(label)}: .*$`, 'm');
+  const existingLine = next.match(pattern)?.[0] || '';
+  const generatedValue = line.slice(line.indexOf(':') + 1).trim();
+  const existingValue = existingLine.includes(':') ? existingLine.slice(existingLine.indexOf(':') + 1).trim() : '';
+  if (
+    ['Install command', 'Dev command', 'Test command', 'Lint command', 'Typecheck command', 'Local URL', 'Production URL'].includes(label)
+    && existingValue
+    && (!generatedValue || generatedValue === 'not_required')
+  ) {
+    continue;
+  }
+  if (pattern.test(next)) next = next.replace(pattern, line);
+}
+
+process.stdout.write(next.trimEnd() + '\n');
+NODE
+)"
+fi
 
 write_file "PROJECT_STATE.md" "$PROJECT_STATE_CONTENT"
 
@@ -1281,13 +1511,13 @@ PROJECT_STATE_JSON="$(cat <<EOF
   "quality_gates": {
     "foundation_readiness": "$FOUNDATION_VERDICT",
     "code_context": "missing",
-    "health": "unknown",
-    "browser_qa": "not_run",
-    "windows_qa": "skipped",
-    "review": "not_run",
-    "security": "not_run",
-    "performance": "not_run",
-    "deployment": "not_started"
+    "health": "$(json_escape "$EXISTING_HEALTH_GATE")",
+    "browser_qa": "$(json_escape "$EXISTING_BROWSER_QA_GATE")",
+    "windows_qa": "$(json_escape "$EXISTING_WINDOWS_QA_GATE")",
+    "review": "$(json_escape "$EXISTING_REVIEW_GATE")",
+    "security": "$(json_escape "$EXISTING_SECURITY_GATE")",
+    "performance": "$(json_escape "$EXISTING_PERFORMANCE_GATE")",
+    "deployment": "$(json_escape "$EXISTING_DEPLOYMENT_GATE")"
   },
   "artifacts": {
     "foundation_readiness_report": "docs/FOUNDATION_READINESS_REPORT.md",
@@ -1325,6 +1555,81 @@ PROJECT_STATE_JSON="$(cat <<EOF
 }
 EOF
 )"
+
+if [ -f "$TARGET_DIR/.gstack/project-state.json" ] && command -v node >/dev/null 2>&1; then
+  PROJECT_STATE_JSON="$(GENERATED_STATE_JSON="$PROJECT_STATE_JSON" EXISTING_MARKDOWN_EVIDENCE_JSON="$EXISTING_MARKDOWN_EVIDENCE_JSON" node - "$TARGET_DIR/.gstack/project-state.json" <<'NODE'
+const fs = require('fs');
+const existingPath = process.argv[2];
+const generated = JSON.parse(process.env.GENERATED_STATE_JSON);
+const markdownEvidence = JSON.parse(process.env.EXISTING_MARKDOWN_EVIDENCE_JSON || '{}');
+let existing = {};
+try {
+  existing = JSON.parse(fs.readFileSync(existingPath, 'utf8'));
+} catch {}
+
+const preserveTopLevel = [
+  'status',
+  'acceptance',
+  'qa',
+  'review',
+  'security',
+  'performance',
+  'release',
+  'deployment',
+  'gate_evidence',
+  'evidence',
+];
+const enrichedExisting = { ...existing };
+if (markdownEvidence.phase) enrichedExisting.phase = markdownEvidence.phase;
+if (markdownEvidence.goal) enrichedExisting.goal = markdownEvidence.goal;
+if (markdownEvidence.last_completed_agent) enrichedExisting.last_completed_agent = markdownEvidence.last_completed_agent;
+enrichedExisting.quality_gates = {
+  ...(existing.quality_gates || {}),
+  ...(markdownEvidence.quality_gates || {}),
+};
+enrichedExisting.runtime = {
+  ...(existing.runtime || {}),
+  ...(markdownEvidence.runtime || {}),
+};
+enrichedExisting.artifacts = {
+  ...(existing.artifacts || {}),
+  ...(markdownEvidence.artifacts || {}),
+};
+if (Object.keys(markdownEvidence.gate_evidence || {}).length) {
+  enrichedExisting.gate_evidence = {
+    ...(existing.gate_evidence || {}),
+    ...markdownEvidence.gate_evidence,
+  };
+}
+
+const next = { ...enrichedExisting, ...generated };
+for (const key of preserveTopLevel) {
+  if (enrichedExisting[key] !== undefined) next[key] = enrichedExisting[key];
+}
+next.quality_gates = {
+  ...(generated.quality_gates || {}),
+  ...(enrichedExisting.quality_gates || {}),
+  foundation_readiness: generated.quality_gates?.foundation_readiness,
+  code_context: generated.quality_gates?.code_context,
+};
+next.artifacts = {
+  ...(enrichedExisting.artifacts || {}),
+  ...(generated.artifacts || {}),
+};
+const runtime = { ...(enrichedExisting.runtime || {}) };
+for (const [key, value] of Object.entries(generated.runtime || {})) {
+  const hasExisting = runtime[key] !== undefined && runtime[key] !== null && runtime[key] !== '';
+  if (hasExisting && (value === undefined || value === null || value === '' || value === 'not_required')) continue;
+  if (value !== undefined && value !== null && value !== '') runtime[key] = value;
+}
+next.runtime = runtime;
+next.phase = enrichedExisting.phase || generated.phase;
+next.goal = enrichedExisting.goal || generated.goal;
+next.last_completed_agent = enrichedExisting.last_completed_agent || generated.last_completed_agent;
+process.stdout.write(`${JSON.stringify(next, null, 2)}\n`);
+NODE
+)"
+fi
 
 write_file ".gstack/project-state.json" "$PROJECT_STATE_JSON"
 

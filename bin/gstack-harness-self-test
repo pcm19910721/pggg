@@ -114,6 +114,10 @@ case "${1:-}" in
     ;;
   put)
     slug="${2:-}"
+    if [ -n "${GBRAIN_FAIL_PUT:-}" ]; then
+      printf 'simulated gbrain put failure for %s\n' "$slug" >&2
+      exit 42
+    fi
     content=""
     shift 2 || true
     while [ "$#" -gt 0 ]; do
@@ -276,6 +280,13 @@ test_fresh_install() {
   assert_contains "$TMP_ROOT/sync-gbrain.log" $'put\tproject/install/overview'
   assert_contains "$TMP_ROOT/sync-gbrain.log" $'put\tproject/install/code-context'
 
+  (cd "$INSTALL_DIR" && GBRAIN_FAIL_PUT=1 PATH="$FAKE_BIN:$PATH" node scripts/ai-context-bridge.mjs sync-gbrain --page overview > "$TMP_ROOT/sync-gbrain-fallback.out" 2> "$TMP_ROOT/sync-gbrain-fallback.err")
+  assert_json_field "$TMP_ROOT/sync-gbrain-fallback.out" "state.event === 'sync_gbrain' && state.status === 'fallback'" "sync-gbrain did not downgrade gbrain write failure to fallback status"
+  assert_json_field "$TMP_ROOT/sync-gbrain-fallback.out" "state.warnings.includes('gbrain_project_memory_sync_failed')" "sync-gbrain fallback did not record warning"
+  assert_json_field "$TMP_ROOT/sync-gbrain-fallback.out" "state.fallback_artifacts.some((p) => p.includes('.ai-context/gbrain-fallback/'))" "sync-gbrain fallback did not write local artifact"
+  assert_file "$INSTALL_DIR/.ai-context/gbrain-fallback/project-install-overview.md"
+  assert_contains "$INSTALL_DIR/.ai-context/gbrain-fallback/project-install-overview.md" "slug: \"project/install/overview\""
+
   local legacy_content_dir="$TMP_ROOT/legacy-gbrain-content"
   mkdir -p "$legacy_content_dir"
   cat > "$legacy_content_dir/project__install__overview.md" <<EOF
@@ -416,8 +427,27 @@ test_reinit_preserves_runtime_state() {
 
   node <<'NODE' > "$PRESERVE_DIR/.gstack/project-state.json"
 const state = {
-  phase: "maintenance",
-  last_completed_agent: "System Tuning Agent",
+  phase: "foundation",
+  last_completed_agent: "Foundation Remediation Agent",
+  runtime: {
+    install: "npm install",
+    dev: "",
+    test: "npm test",
+    lint: "",
+    typecheck: "",
+    local_url: "",
+    production_url: ""
+  },
+  quality_gates: {
+    foundation_readiness: "ready",
+    code_context: "ready",
+    health: "unknown",
+    browser_qa: "not_run",
+    review: "not_run",
+    security: "not_run",
+    performance: "not_run",
+    deployment: "not_started"
+  },
   warnings: ["gbrain_query_timeout"],
   problem_handling: {
     status: "completed",
@@ -437,19 +467,97 @@ NODE
 
   printf '%s\n' "REAL PROBLEM REPORT" > "$PRESERVE_DIR/docs/PROBLEM_HANDLING_REPORT.md"
   printf '%s\n' "REAL TUNING REPORT" > "$PRESERVE_DIR/docs/SYSTEM_TUNING_REPORT.md"
+  cat > "$PRESERVE_DIR/PROJECT_STATE.md" <<'EOF'
+# Project State
+
+## Current
+
+- Phase: acceptance
+- Goal: Full gstack-multiagent agent-chain acceptance on a real target project.
+- Branch: master
+- Last updated: 2026-05-03
+- Last completed agent: Full Agent Acceptance Run
+- Next recommended agent: Orchestrator
+- Next recommended recipe: R0 Restore / Resume Context
+- Workspace mode: target_project
+
+## Foundation
+
+- Readiness: ready
+- Problem handling: completed (docs/PROBLEM_HANDLING_REPORT.md)
+
+## Runtime
+
+- Install command: npm install
+- Dev command:
+- Test command: npm test
+- Lint command:
+- Typecheck command:
+- Local URL: http://127.0.0.1:8788
+- Production URL:
+
+## Quality Gates
+
+- Foundation Readiness: ready
+- Code Context: ready
+- Health: passing
+- Browser QA: passing
+- Windows QA: skipped
+- Review: passing
+- Security: warning
+- Performance: passing
+- Deployment: blocked
+
+## Gate Evidence
+
+- Health:
+  - Command: npm test
+  - Exit code: 0
+  - Artifact: docs/FULL_AGENT_ACCEPTANCE_REPORT.md
+- Browser QA:
+  - URL: http://127.0.0.1:8788
+  - Artifact: docs/FULL_AGENT_ACCEPTANCE_REPORT.md
+- Review:
+  - Base: HEAD baseline abc123
+  - Artifact: docs/FULL_AGENT_ACCEPTANCE_REPORT.md
+- Security:
+  - Artifact: docs/FULL_AGENT_ACCEPTANCE_REPORT.md
+- Performance:
+  - Artifact: docs/FULL_AGENT_ACCEPTANCE_REPORT.md
+
+## Artifacts
+
+- QA report: docs/FULL_AGENT_ACCEPTANCE_REPORT.md
+- Review report: docs/FULL_AGENT_ACCEPTANCE_REPORT.md
+- Security report: docs/FULL_AGENT_ACCEPTANCE_REPORT.md
+- Performance report: docs/FULL_AGENT_ACCEPTANCE_REPORT.md
+- Release status: docs/FULL_AGENT_ACCEPTANCE_REPORT.md
+EOF
 
   run_init "$PRESERVE_DIR"
 
   assert_contains "$PRESERVE_DIR/docs/PROBLEM_HANDLING_REPORT.md" "REAL PROBLEM REPORT"
   assert_contains "$PRESERVE_DIR/docs/SYSTEM_TUNING_REPORT.md" "REAL TUNING REPORT"
-  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Phase: maintenance"
-  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Last completed agent: System Tuning Agent"
+  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Phase: acceptance"
+  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Last completed agent: Full Agent Acceptance Run"
+  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Test command: npm test"
+  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Local URL: http://127.0.0.1:8788"
+  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Health: passing"
+  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Browser QA: passing"
+  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Review: passing"
+  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Security: warning"
+  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Performance: passing"
+  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Deployment: blocked"
   assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Next recommended recipe: R0 Restore / Resume Context"
   assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Problem handling: completed (docs/PROBLEM_HANDLING_REPORT.md)"
 
   node -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" "$PRESERVE_DIR/.gstack/project-state.json"
-  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.phase === 'maintenance'" "re-init did not preserve phase"
-  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.last_completed_agent === 'System Tuning Agent'" "re-init did not preserve last completed agent"
+  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.phase === 'acceptance'" "re-init did not preserve phase"
+  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.last_completed_agent === 'Full Agent Acceptance Run'" "re-init did not preserve last completed agent"
+  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.runtime.test === 'npm test' && state.runtime.local_url === 'http://127.0.0.1:8788'" "re-init downgraded runtime evidence"
+  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.quality_gates.health === 'passing' && state.quality_gates.browser_qa === 'passing' && state.quality_gates.review === 'passing' && state.quality_gates.security === 'warning' && state.quality_gates.performance === 'passing' && state.quality_gates.deployment === 'blocked'" "re-init downgraded completed quality gates"
+  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.artifacts.qa_report === 'docs/FULL_AGENT_ACCEPTANCE_REPORT.md' && state.artifacts.release_status === 'docs/FULL_AGENT_ACCEPTANCE_REPORT.md'" "re-init dropped high-level evidence artifacts"
+  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.gate_evidence.health.artifact === 'docs/FULL_AGENT_ACCEPTANCE_REPORT.md' && state.gate_evidence.browser_qa.url === 'http://127.0.0.1:8788'" "re-init did not lift markdown gate evidence into JSON"
   assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.next_recommended_agent === 'Orchestrator'" "re-init did not clear recovered next agent"
   assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.next_recommended_recipe === 'R0 Restore / Resume Context'" "re-init did not clear recovered next recipe"
   assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "!state.warnings.includes('gbrain_query_timeout')" "re-init did not clear stale readiness warning"
@@ -457,7 +565,15 @@ NODE
   assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.system_tuning && state.system_tuning.active_issue === 'harness-gbrain-timeout-state-template'" "re-init did not preserve system tuning state"
   assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.usage && state.usage.latest_event === 'harness_init'" "re-init did not record latest usage run"
 
-  pass "re-init preserves reports and resolved issue history while clearing recovered routing state"
+  PATH="$FAKE_BIN:$PATH" "$PRESERVE_DIR/.gstack/harness/bin/gstack-harness-readiness" --target "$PRESERVE_DIR" > "$TMP_ROOT/preserve-readiness.out"
+  PATH="$FAKE_BIN:$PATH" "$PRESERVE_DIR/.gstack/harness/bin/gstack-harness-remediate" --target "$PRESERVE_DIR" > "$TMP_ROOT/preserve-remediate.out"
+  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.last_completed_agent === 'Full Agent Acceptance Run'" "readiness/remediation rerun downgraded last completed agent"
+  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.quality_gates.review === 'passing' && state.quality_gates.security === 'warning' && state.quality_gates.performance === 'passing' && state.quality_gates.deployment === 'blocked'" "readiness/remediation rerun downgraded completed gates"
+  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Last completed agent: Full Agent Acceptance Run"
+  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Review: passing"
+  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Deployment: blocked"
+
+  pass "re-init/readiness/remediation preserve reports, completed gates, and resolved issue history while clearing recovered routing state"
 }
 
 test_usage_report() {

@@ -478,15 +478,23 @@ nextState.foundation = {
   last_readiness_check: env.GENERATED_AT,
   problem_handling_required: ['timeout', 'failed'].includes(env.GBRAIN_QUERY_STATUS),
 };
+function mergeRuntimeValue(nextValue, previousValue) {
+  const hasPrevious = previousValue !== undefined && previousValue !== null && previousValue !== '';
+  if (hasPrevious && (nextValue === undefined || nextValue === null || nextValue === '' || nextValue === 'not_required')) {
+    return previousValue;
+  }
+  return nextValue || '';
+}
+
 nextState.runtime = {
   ...(state.runtime || {}),
-  install: runtime.install,
-  dev: runtime.dev,
-  test: runtime.test,
-  lint: runtime.lint,
-  typecheck: runtime.typecheck,
-  local_url: runtime.local_url,
-  production_url: runtime.production_url,
+  install: mergeRuntimeValue(runtime.install, state.runtime?.install),
+  dev: mergeRuntimeValue(runtime.dev, state.runtime?.dev),
+  test: mergeRuntimeValue(runtime.test, state.runtime?.test),
+  lint: mergeRuntimeValue(runtime.lint, state.runtime?.lint),
+  typecheck: mergeRuntimeValue(runtime.typecheck, state.runtime?.typecheck),
+  local_url: mergeRuntimeValue(runtime.local_url, state.runtime?.local_url),
+  production_url: mergeRuntimeValue(runtime.production_url, state.runtime?.production_url),
 };
 nextState.quality_gates = {
   ...(state.quality_gates || {}),
