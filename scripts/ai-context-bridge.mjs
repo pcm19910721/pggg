@@ -965,6 +965,11 @@ function samePath(a, b) {
   return path.resolve(String(a)) === path.resolve(String(b));
 }
 
+function legacyRepoPathValue(markdown) {
+  const raw = markdown.match(/Target path:\s*(.+)/i)?.[1] || '';
+  return raw.trim().replace(/[。.,;:!?，；：！？]+$/u, '').trim();
+}
+
 async function assertNoProjectCollision(config, summary, slugs) {
   const overview = slugs.overview;
   if (!overview) return;
@@ -978,7 +983,7 @@ async function assertNoProjectCollision(config, summary, slugs) {
   }
 
   const existingPath = frontmatterValue(existing.stdout, 'repo_path')
-    || (existing.stdout.match(/Target path:\s*(.+)/i)?.[1] || '').trim();
+    || legacyRepoPathValue(existing.stdout);
   if (!existingUid && existingPath && !samePath(existingPath, summary.repo_path || config.repo_path)) {
     throw new Error(`gbrain project collision for ${overview}: existing repo_path ${existingPath} differs from ${summary.repo_path || config.repo_path}`);
   }

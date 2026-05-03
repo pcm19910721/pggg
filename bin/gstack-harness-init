@@ -1441,7 +1441,28 @@ if [ "$GBRAIN_STATUS" = "ready" ] && [ "$DRY_RUN" -ne 1 ]; then
   if timeout 8s gbrain get "project/$PROJECT_ID/overview" >/dev/null 2>&1; then
     :
   else
+    PROJECT_STABLE_KEY="$TARGET_DIR"
+    if git -C "$TARGET_DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
+      PROJECT_REMOTE_URL="$(git -C "$TARGET_DIR" config --get remote.origin.url 2>/dev/null || true)"
+      [ -n "$PROJECT_REMOTE_URL" ] && PROJECT_STABLE_KEY="$PROJECT_REMOTE_URL"
+    fi
+    PROJECT_UID="$(printf '%s' "$PROJECT_STABLE_KEY" | sha256sum | cut -c1-16)"
     OVERVIEW_CONTENT="$(cat <<EOF
+---
+type: overview
+title: "Project Overview: $PROJECT_ID"
+project_id: "$PROJECT_ID"
+project_uid: "$PROJECT_UID"
+repo_path: "$TARGET_DIR"
+tags:
+  - scope:project
+  - project:$PROJECT_ID
+  - project_uid:$PROJECT_UID
+  - type:overview
+  - source:harness
+  - status:active
+---
+
 # Project Overview: $PROJECT_ID
 
 ## Status
@@ -1459,6 +1480,10 @@ $EFFECTIVE_MODE
 ## Foundation Verdict
 
 $FOUNDATION_VERDICT
+
+## Target
+
+$TARGET_DIR
 EOF
 )"
   if timeout 30s env -u OPENAI_API_KEY GBRAIN_NO_AUTO_HOOKS=1 gbrain put "project/$PROJECT_ID/overview" --content "$OVERVIEW_CONTENT" --no-embed --no-auto-hooks >/dev/null 2>&1; then

@@ -325,6 +325,7 @@ seed_gbrain_page() {
   local slug="$1"
   local title="$2"
   local body="$3"
+  local page_type="${4:-project}"
   if ! command -v gbrain >/dev/null 2>&1 || ! gbrain --version >/dev/null 2>&1; then
     record_warning "gbrain_unavailable"
     return 0
@@ -340,15 +341,66 @@ seed_gbrain_page() {
   fi
   local gbrain_rc
   local content
-  content="$(cat <<EOF
+  local project_uid
+  local project_stable_key
+  local remote_url
+  project_stable_key="$TARGET_DIR"
+  if git -C "$TARGET_DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
+    remote_url="$(git -C "$TARGET_DIR" config --get remote.origin.url 2>/dev/null || true)"
+    [ -n "$remote_url" ] && project_stable_key="$remote_url"
+  fi
+  project_uid="$(printf '%s' "$project_stable_key" | sha256sum | cut -c1-16)"
+  if [ "${slug#project/}" != "$slug" ]; then
+    content="$(cat <<EOF
+---
+type: $page_type
+title: "$title"
+project_id: "$PROJECT_ID"
+project_uid: "$project_uid"
+repo_path: "$TARGET_DIR"
+tags:
+  - scope:project
+  - project:$PROJECT_ID
+  - project_uid:$project_uid
+  - type:$page_type
+  - source:harness
+  - status:active
+---
+
 # $title
 
 $body
 EOF
 )"
+  else
+    content="$(cat <<EOF
+---
+type: $page_type
+title: "$title"
+tags:
+  - scope:system
+  - type:$page_type
+  - source:harness
+  - status:active
+---
+
+# $title
+
+$body
+EOF
+)"
+  fi
   if timeout 8s env -u OPENAI_API_KEY GBRAIN_NO_AUTO_HOOKS=1 gbrain put "$slug" --content "$content" --no-embed --no-auto-hooks >/dev/null 2>&1; then
-    timeout 4s gbrain tag "$slug" scope:project >/dev/null 2>&1 || true
-    timeout 4s gbrain tag "$slug" "project:$PROJECT_ID" >/dev/null 2>&1 || true
+    if [ "${slug#project/}" != "$slug" ]; then
+      timeout 4s gbrain tag "$slug" scope:project >/dev/null 2>&1 || true
+      timeout 4s gbrain tag "$slug" "project:$PROJECT_ID" >/dev/null 2>&1 || true
+      timeout 4s gbrain tag "$slug" "project_uid:$project_uid" >/dev/null 2>&1 || true
+    else
+      timeout 4s gbrain tag "$slug" scope:system >/dev/null 2>&1 || true
+    fi
+    timeout 4s gbrain tag "$slug" "type:$page_type" >/dev/null 2>&1 || true
+    timeout 4s gbrain tag "$slug" source:harness >/dev/null 2>&1 || true
+    timeout 4s gbrain tag "$slug" status:active >/dev/null 2>&1 || true
     record_action "seed_gbrain_page" "$slug" "seeded core gbrain page"
   else
     gbrain_rc="$?"
@@ -360,14 +412,14 @@ EOF
   fi
 }
 
-seed_gbrain_page "system/orchestration-principles" "Orchestration Principles" "Use gstack skills as the capability layer, GitNexus as the current code-fact layer, and gbrain as durable memory. Do not rewrite gstack skill internals from target projects."
-seed_gbrain_page "system/harness-product-usage" "Harness Product Usage" "The normal user path is cd target-project && pcm-harness. The harness installs protocol files, runs readiness, routes remediation, records usage, and hands off to Orchestrator."
-seed_gbrain_page "system/capability-gap-backlog" "Capability Gap Backlog" "Record repeated warnings, blockers, and handoff failures here so System Tuning can turn them into harness or workflow improvements."
-seed_gbrain_page "project/$PROJECT_ID/overview" "Project Overview: $PROJECT_ID" "Harness project id: $PROJECT_ID. Target path: $TARGET_DIR."
-seed_gbrain_page "project/$PROJECT_ID/state" "Project State: $PROJECT_ID" "Local machine-readable state lives in .gstack/project-state.json. Human-readable state lives in PROJECT_STATE.md."
-seed_gbrain_page "project/$PROJECT_ID/foundation-readiness" "Foundation Readiness: $PROJECT_ID" "Readiness is diagnosed by .gstack/harness/bin/gstack-harness-readiness and summarized in docs/FOUNDATION_READINESS_REPORT.md."
-seed_gbrain_page "project/$PROJECT_ID/code-context" "Code Context: $PROJECT_ID" "GitNexus is the default Code Context provider. UA is optional for dashboard, onboarding, domain graph, and fallback."
-seed_gbrain_page "project/$PROJECT_ID/quality-gates" "Quality Gates: $PROJECT_ID" "Quality gates are stored in .gstack/project-state.json and evidenced by reports under docs/."
+seed_gbrain_page "system/orchestration-principles" "Orchestration Principles" "Use gstack skills as the capability layer, GitNexus as the current code-fact layer, and gbrain as durable memory. Do not rewrite gstack skill internals from target projects." "concept"
+seed_gbrain_page "system/harness-product-usage" "Harness Product Usage" "The normal user path is cd target-project && pcm-harness. The harness installs protocol files, runs readiness, routes remediation, records usage, and hands off to Orchestrator." "concept"
+seed_gbrain_page "system/capability-gap-backlog" "Capability Gap Backlog" "Record repeated warnings, blockers, and handoff failures here so System Tuning can turn them into harness or workflow improvements." "concept"
+seed_gbrain_page "project/$PROJECT_ID/overview" "Project Overview: $PROJECT_ID" "Harness project id: $PROJECT_ID. Target path: $TARGET_DIR" "overview"
+seed_gbrain_page "project/$PROJECT_ID/state" "Project State: $PROJECT_ID" "Local machine-readable state lives in .gstack/project-state.json. Human-readable state lives in PROJECT_STATE.md." "state"
+seed_gbrain_page "project/$PROJECT_ID/foundation-readiness" "Foundation Readiness: $PROJECT_ID" "Readiness is diagnosed by .gstack/harness/bin/gstack-harness-readiness and summarized in docs/FOUNDATION_READINESS_REPORT.md." "foundation-readiness"
+seed_gbrain_page "project/$PROJECT_ID/code-context" "Code Context: $PROJECT_ID" "GitNexus is the default Code Context provider. UA is optional for dashboard, onboarding, domain graph, and fallback." "code-context"
+seed_gbrain_page "project/$PROJECT_ID/quality-gates" "Quality Gates: $PROJECT_ID" "Quality gates are stored in .gstack/project-state.json and evidenced by reports under docs/." "quality-gates"
 
 if [ "$SKIP_CODE_CONTEXT" -ne 1 ] && [ -f "$TARGET_DIR/scripts/ai-context-bridge.mjs" ] && [ -f "$TARGET_DIR/.ai-context/project.json" ]; then
   if [ "$DRY_RUN" -eq 1 ]; then

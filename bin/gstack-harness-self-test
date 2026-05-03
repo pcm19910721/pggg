@@ -87,6 +87,13 @@ case "${1:-}" in
     ;;
   get)
     slug="${2:-}"
+    if [ -n "${GBRAIN_CONTENT_DIR:-}" ]; then
+      file="$GBRAIN_CONTENT_DIR/${slug//\//__}.md"
+      if [ -f "$file" ]; then
+        cat "$file"
+        exit 0
+      fi
+    fi
     case "$slug" in
       project/install/*|project/preserve/*|project/indexed/*|project/runtime/*)
         if [ -n "${GBRAIN_STORE_PATH:-}" ] && [ -f "$GBRAIN_STORE_PATH" ] && grep -Fxq "$slug" "$GBRAIN_STORE_PATH"; then
@@ -107,6 +114,19 @@ case "${1:-}" in
     ;;
   put)
     slug="${2:-}"
+    content=""
+    shift 2 || true
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --content)
+          content="${2:-}"
+          shift 2
+          ;;
+        *)
+          shift
+          ;;
+      esac
+    done
     if [ -n "${GBRAIN_LOG_PATH:-}" ]; then
       printf 'put\t%s\n' "$slug" >> "$GBRAIN_LOG_PATH"
     fi
@@ -116,7 +136,13 @@ case "${1:-}" in
         printf '%s\n' "$slug" >> "$GBRAIN_STORE_PATH"
       fi
     fi
-    cat >/dev/null
+    if [ -z "$content" ]; then
+      content="$(cat)"
+    fi
+    if [ -n "${GBRAIN_CONTENT_DIR:-}" ]; then
+      mkdir -p "$GBRAIN_CONTENT_DIR"
+      printf '%s\n' "$content" > "$GBRAIN_CONTENT_DIR/${slug//\//__}.md"
+    fi
     exit 0
     ;;
   tag)
@@ -250,12 +276,41 @@ test_fresh_install() {
   assert_contains "$TMP_ROOT/sync-gbrain.log" $'put\tproject/install/overview'
   assert_contains "$TMP_ROOT/sync-gbrain.log" $'put\tproject/install/code-context'
 
+  local legacy_content_dir="$TMP_ROOT/legacy-gbrain-content"
+  mkdir -p "$legacy_content_dir"
+  cat > "$legacy_content_dir/project__install__overview.md" <<EOF
+---
+type: project
+title: Overview
+tags:
+  - project:install
+  - scope:project
+---
+
+# Project Overview: install
+
+Harness project id: install. Target path: $INSTALL_DIR.
+EOF
+  (cd "$INSTALL_DIR" && GBRAIN_CONTENT_DIR="$legacy_content_dir" PATH="$FAKE_BIN:$PATH" node scripts/ai-context-bridge.mjs sync-gbrain --page overview > "$TMP_ROOT/sync-gbrain-legacy.out")
+  assert_json_field "$TMP_ROOT/sync-gbrain-legacy.out" "state.event === 'sync_gbrain' && state.status === 'synced' && state.pages_written.some((p) => p.slug === 'project/install/overview')" "sync-gbrain rejected legacy overview path with trailing punctuation"
+
   PATH="$FAKE_BIN:$PATH" "$INSTALL_DIR/.gstack/harness/bin/gstack-harness-remediate" --target "$INSTALL_DIR" > "$TMP_ROOT/remediate.out"
   assert_contains "$TMP_ROOT/remediate.out" "Foundation remediation status:"
   assert_contains "$INSTALL_DIR/docs/FOUNDATION_REMEDIATION_REPORT.md" "foundation_remediation:"
   assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.foundation && state.foundation.remediation" "remediation did not update foundation state"
   PATH="$FAKE_BIN:$PATH" "$INSTALL_DIR/.gstack/harness/bin/gstack-harness-readiness" --target "$INSTALL_DIR" > "$TMP_ROOT/readiness.out"
   assert_contains "$TMP_ROOT/readiness.out" '"status"'
+
+  local seed_dir="$TMP_ROOT/seeded"
+  local seed_store="$TMP_ROOT/seeded-gbrain-store.txt"
+  local seed_content_dir="$TMP_ROOT/seeded-gbrain-content"
+  mkdir -p "$seed_dir" "$seed_content_dir"
+  GSTACK_HARNESS_REGISTRY="$TMP_ROOT/projects.jsonl" GBRAIN_STORE_PATH="$seed_store" GBRAIN_CONTENT_DIR="$seed_content_dir" PATH="$FAKE_BIN:$PATH" "$INIT" --target "$seed_dir" --project-id seeded --mode docs-only --no-start-codex > "$seed_dir/init.out"
+  assert_contains "$seed_content_dir/project__seeded__overview.md" "project_uid:"
+  assert_contains "$seed_content_dir/project__seeded__overview.md" "repo_path: \"$seed_dir\""
+  GBRAIN_STORE_PATH="$seed_store" GBRAIN_CONTENT_DIR="$seed_content_dir" PATH="$FAKE_BIN:$PATH" "$seed_dir/.gstack/harness/bin/gstack-harness-remediate" --target "$seed_dir" > "$TMP_ROOT/seeded-remediate.out"
+  assert_contains "$seed_content_dir/project__seeded__state.md" "project_uid:"
+  assert_contains "$seed_content_dir/project__seeded__state.md" "repo_path: \"$seed_dir\""
 
   pass "fresh install writes protocol, agent team, pcm-harness, reports, managed block, usage run, and valid JSON"
 }
