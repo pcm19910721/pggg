@@ -1,0 +1,249 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+gstack-harness-enable-report-timer - enable automatic usage feedback aggregation
+
+Usage:
+  gstack-harness-enable-report-timer [options]
+
+Options:
+  --template-source DIR    Template source directory. Default: detected from this script.
+  --registry FILE          Project registry JSONL. Default: ~/.gstack-harness/projects.jsonl
+  --output FILE            Markdown report output. Default: docs/USAGE_FEEDBACK_REPORT.md in template source.
+  --json-output FILE       Optional machine-readable summary output.
+  --unit-name NAME         systemd unit basename. Default: gstack-harness-usage-report
+  --unit-dir DIR           systemd user unit directory. Default: ~/.config/systemd/user
+  --runner-dir DIR         Runner script directory. Default: ~/.config/gstack-harness
+  --interval DURATION      Run interval for OnUnitActiveSec. Default: 1h
+  --on-calendar SPEC       Use an OnCalendar schedule instead of interval mode.
+  --enable-linger          Run user services after boot even before interactive login.
+  --no-enable              Write files but do not call systemctl.
+  --dry-run                Print what would be written, but do not write files.
+  -h, --help               Show help.
+
+Notes:
+  Without --enable-linger, the timer starts when the user systemd manager starts,
+  normally after login. With linger enabled, it can run after boot before login.
+EOF
+}
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEMPLATE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [ ! -f "$TEMPLATE_ROOT/HARNESS_PRODUCT_USAGE.md" ] && command -v node >/dev/null 2>&1; then
+  TARGET_CANDIDATE="$(cd "$SCRIPT_DIR/../../.." 2>/dev/null && pwd || true)"
+  if [ -n "$TARGET_CANDIDATE" ] && [ -f "$TARGET_CANDIDATE/.gstack/project-state.json" ]; then
+    DETECTED_TEMPLATE_ROOT="$(node -e 'const fs=require("fs"); const p=process.argv[1]; try { const s=JSON.parse(fs.readFileSync(p,"utf8")); if (s.template_source) process.stdout.write(s.template_source); } catch {}' "$TARGET_CANDIDATE/.gstack/project-state.json" 2>/dev/null || true)"
+    if [ -n "$DETECTED_TEMPLATE_ROOT" ] && [ -d "$DETECTED_TEMPLATE_ROOT" ]; then
+      TEMPLATE_ROOT="$DETECTED_TEMPLATE_ROOT"
+    fi
+  fi
+fi
+
+REGISTRY="${GSTACK_HARNESS_REGISTRY:-$HOME/.gstack-harness/projects.jsonl}"
+OUTPUT="$TEMPLATE_ROOT/docs/USAGE_FEEDBACK_REPORT.md"
+JSON_OUTPUT=""
+UNIT_NAME="gstack-harness-usage-report"
+UNIT_DIR="$HOME/.config/systemd/user"
+RUNNER_DIR="$HOME/.config/gstack-harness"
+INTERVAL="1h"
+ON_CALENDAR=""
+ENABLE_LINGER=0
+ENABLE_TIMER=1
+DRY_RUN=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --template-source)
+      TEMPLATE_ROOT="${2:-}"
+      OUTPUT="$TEMPLATE_ROOT/docs/USAGE_FEEDBACK_REPORT.md"
+      shift 2
+      ;;
+    --registry)
+      REGISTRY="${2:-}"
+      shift 2
+      ;;
+    --output)
+      OUTPUT="${2:-}"
+      shift 2
+      ;;
+    --json-output)
+      JSON_OUTPUT="${2:-}"
+      shift 2
+      ;;
+    --unit-name)
+      UNIT_NAME="${2:-}"
+      shift 2
+      ;;
+    --unit-dir)
+      UNIT_DIR="${2:-}"
+      shift 2
+      ;;
+    --runner-dir)
+      RUNNER_DIR="${2:-}"
+      shift 2
+      ;;
+    --interval)
+      INTERVAL="${2:-}"
+      shift 2
+      ;;
+    --on-calendar)
+      ON_CALENDAR="${2:-}"
+      shift 2
+      ;;
+    --enable-linger)
+      ENABLE_LINGER=1
+      shift
+      ;;
+    --no-enable)
+      ENABLE_TIMER=0
+      shift
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+case "$UNIT_NAME" in
+  *[!a-zA-Z0-9_.@-]*|"")
+    echo "ERROR: --unit-name contains unsupported characters" >&2
+    exit 2
+    ;;
+esac
+
+REPORT_CMD="$TEMPLATE_ROOT/bin/gstack-harness-usage-report"
+if [ ! -x "$REPORT_CMD" ]; then
+  echo "ERROR: report command not executable: $REPORT_CMD" >&2
+  exit 2
+fi
+
+shell_quote() {
+  local value="$1"
+  printf "'%s'" "$(printf '%s' "$value" | sed "s/'/'\\\\''/g")"
+}
+
+write_text() {
+  local path="$1"
+  local content="$2"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf 'DRY_RUN write %s\n' "$path"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$path")"
+  printf '%s\n' "$content" > "$path"
+}
+
+RUNNER="$RUNNER_DIR/$UNIT_NAME.sh"
+SERVICE="$UNIT_DIR/$UNIT_NAME.service"
+TIMER="$UNIT_DIR/$UNIT_NAME.timer"
+
+JSON_ARG=""
+if [ -n "$JSON_OUTPUT" ]; then
+  JSON_ARG=" --json-output $(shell_quote "$JSON_OUTPUT")"
+fi
+
+RUNNER_CONTENT="$(cat <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+$(shell_quote "$REPORT_CMD") \\
+  --registry $(shell_quote "$REGISTRY") \\
+  --output $(shell_quote "$OUTPUT")$JSON_ARG
+EOF
+)"
+
+SERVICE_CONTENT="$(cat <<EOF
+[Unit]
+Description=Generate GStack Harness usage feedback report
+After=default.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env bash $RUNNER
+EOF
+)"
+
+if [ -n "$ON_CALENDAR" ]; then
+  TIMER_SCHEDULE="$(cat <<EOF
+OnCalendar=$ON_CALENDAR
+Persistent=true
+EOF
+)"
+else
+  TIMER_SCHEDULE="$(cat <<EOF
+OnBootSec=5min
+OnUnitActiveSec=$INTERVAL
+Persistent=true
+EOF
+)"
+fi
+
+TIMER_CONTENT="$(cat <<EOF
+[Unit]
+Description=Run GStack Harness usage feedback report on a schedule
+
+[Timer]
+$TIMER_SCHEDULE
+Unit=$UNIT_NAME.service
+
+[Install]
+WantedBy=timers.target
+EOF
+)"
+
+write_text "$RUNNER" "$RUNNER_CONTENT"
+write_text "$SERVICE" "$SERVICE_CONTENT"
+write_text "$TIMER" "$TIMER_CONTENT"
+
+if [ "$DRY_RUN" -ne 1 ]; then
+  chmod +x "$RUNNER"
+fi
+
+if [ "$ENABLE_TIMER" -eq 1 ]; then
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf 'DRY_RUN systemctl --user daemon-reload\n'
+    printf 'DRY_RUN systemctl --user enable --now %s.timer\n' "$UNIT_NAME"
+  elif ! command -v systemctl >/dev/null 2>&1; then
+    echo "ERROR: systemctl not found; files were written but timer was not enabled" >&2
+    exit 1
+  else
+    systemctl --user daemon-reload
+    systemctl --user enable --now "$UNIT_NAME.timer"
+  fi
+fi
+
+if [ "$ENABLE_LINGER" -eq 1 ]; then
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf 'DRY_RUN loginctl enable-linger %s\n' "$USER"
+  elif ! command -v loginctl >/dev/null 2>&1; then
+    echo "warning: loginctl not found; linger was not enabled" >&2
+  else
+    loginctl enable-linger "$USER"
+  fi
+fi
+
+cat <<EOF
+Enabled GStack Harness usage report timer.
+
+Runner: $RUNNER
+Service: $SERVICE
+Timer: $TIMER
+Report: $OUTPUT
+Registry: $REGISTRY
+Schedule: $([ -n "$ON_CALENDAR" ] && printf 'OnCalendar=%s' "$ON_CALENDAR" || printf 'OnBootSec=5min, OnUnitActiveSec=%s' "$INTERVAL")
+Linger: $([ "$ENABLE_LINGER" -eq 1 ] && printf 'requested' || printf 'not_requested')
+EOF

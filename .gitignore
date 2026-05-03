@@ -1,0 +1,28 @@
+# Local environment
+.env
+.env.*
+!.env.example
+
+# OS/editor/cache files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Runtime and generated artifacts
+.gitnexus/
+.ai-context/runs/
+.gstack/usage-runs/*.json
+.gstack/usage-runs/index.jsonl
+.pytest_cache/
+__pycache__/
+node_modules/
+
+# Harness install safety backups
+*.bak-*
+
+# Logs and databases
+*.log
+*.db
+*.sqlite
+*.sqlite3

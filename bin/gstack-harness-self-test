@@ -1,0 +1,431 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEMPLATE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+INIT="$SCRIPT_DIR/gstack-harness-init"
+
+TMP_ROOT="${TMPDIR:-/tmp}/gstack-harness-self-test-$$"
+INSTALL_DIR="$TMP_ROOT/install"
+PRESERVE_DIR="$TMP_ROOT/preserve"
+FAKE_BIN="$TMP_ROOT/fake-bin"
+
+cleanup() {
+  rm -rf "$TMP_ROOT"
+}
+trap cleanup EXIT
+
+log() {
+  printf '%s\n' "$*"
+}
+
+fail() {
+  printf 'FAIL %s\n' "$*" >&2
+  exit 1
+}
+
+pass() {
+  printf 'PASS %s\n' "$*"
+}
+
+assert_file() {
+  [ -f "$1" ] || fail "missing file: $1"
+}
+
+assert_contains() {
+  local file="$1"
+  local pattern="$2"
+  if ! grep -Fq -- "$pattern" "$file"; then
+    fail "expected '$pattern' in $file"
+  fi
+}
+
+assert_json_field() {
+  local file="$1"
+  local expr="$2"
+  local message="$3"
+  node -e "
+    const fs = require('fs');
+    const state = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+    if (!($expr)) {
+      console.error(process.argv[2]);
+      process.exit(1);
+    }
+  " "$file" "$message" || fail "$message"
+}
+
+require_node() {
+  command -v node >/dev/null 2>&1 || fail "node is required for JSON validation"
+}
+
+setup_fake_tools() {
+  mkdir -p "$FAKE_BIN"
+  cat > "$FAKE_BIN/gbrain" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "${1:-}" in
+  --version)
+    printf 'gbrain-test 0.0.0\n'
+    ;;
+  list)
+    for project in install preserve indexed runtime; do
+      printf 'project/%s/overview\n' "$project"
+      printf 'project/%s/state\n' "$project"
+      printf 'project/%s/foundation-readiness\n' "$project"
+      printf 'project/%s/code-context\n' "$project"
+      printf 'project/%s/quality-gates\n' "$project"
+    done
+    printf 'system/orchestration-principles\n'
+    ;;
+  query)
+    printf 'query completed\n'
+    ;;
+  put|tag)
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+EOF
+  chmod +x "$FAKE_BIN/gbrain"
+}
+
+run_init() {
+  local target="$1"
+  GSTACK_HARNESS_REGISTRY="$TMP_ROOT/projects.jsonl" PATH="$FAKE_BIN:$PATH" "$INIT" --target "$target" --mode docs-only --no-start-codex > "$target/init.out" 2> "$target/init.err"
+  if [ -s "$target/init.err" ]; then
+    sed -n '1,120p' "$target/init.err" >&2
+    fail "init wrote to stderr for $target"
+  fi
+}
+
+test_fresh_install() {
+  mkdir -p "$INSTALL_DIR"
+  run_init "$INSTALL_DIR"
+
+  local required_files=(
+    "HARNESS_PRODUCT_USAGE.md"
+    "GSTACK_SKILL_REGISTRY.md"
+    "WORKFLOW_RECIPES.md"
+    "ORCHESTRATOR_RUNBOOK.md"
+    "SYSTEM_TUNING_LOOP.md"
+    "MEMORY_ARCHITECTURE.md"
+    "GBRAIN_SCHEMA.md"
+    "CLAUDE.md"
+    "PROJECT_STATE.md"
+    ".gstack/project-state.json"
+    ".gstack/harness/agents/TEAM.md"
+    ".gstack/harness/agents/problem-handling.md"
+    ".gstack/harness/bin/pcm-harness"
+    ".gstack/harness/bin/pcm-harness.ps1"
+    ".gstack/harness/bin/pcm-harness.cmd"
+    ".gstack/harness/bin/gstack-harness-record-run"
+    ".gstack/harness/bin/gstack-harness-usage-report"
+    ".gstack/harness/bin/gstack-harness-enable-report-timer"
+    ".gstack/harness/bin/gstack-harness-remediate"
+    ".gstack/harness/bin/gstack-harness-readiness"
+    ".ai-context/project.json"
+    ".ai-context/FIELD_CONTRACT.md"
+    ".ai-context/gitnexus-status.json"
+    ".gitnexusignore"
+    "scripts/ai-context-bridge.mjs"
+    ".gstack/usage-runs/README.md"
+    ".gstack/usage-runs/index.jsonl"
+    "docs/AGENT_ORCHESTRATOR.md"
+    "docs/AGENT_WORKFLOWS.md"
+    "docs/FOUNDATION_READINESS_REPORT.md"
+    "docs/FOUNDATION_REMEDIATION_REPORT.md"
+    "docs/CODEX_START_PROMPT.md"
+    "docs/CODE_CONTEXT_REPORT.md"
+    "docs/CODEBASE_MAP_REPORT.md"
+    "docs/PROBLEM_HANDLING_REPORT.md"
+    "docs/SYSTEM_TUNING_REPORT.md"
+  )
+
+  local rel
+  for rel in "${required_files[@]}"; do
+    assert_file "$INSTALL_DIR/$rel"
+  done
+
+  assert_contains "$INSTALL_DIR/CLAUDE.md" "<!-- GSTACK_HARNESS_START -->"
+  assert_contains "$INSTALL_DIR/CLAUDE.md" "<!-- GSTACK_HARNESS_END -->"
+  assert_contains "$INSTALL_DIR/.gstack/harness/agents/TEAM.md" "Problem Handling Agent"
+  assert_contains "$INSTALL_DIR/.gstack/harness/agents/TEAM.md" "Code Context Agent"
+  assert_contains "$INSTALL_DIR/.gstack/harness/agents/problem-handling.md" "gbrain_query_timeout"
+  assert_contains "$INSTALL_DIR/docs/CODEX_START_PROMPT.md" ".gstack/harness/agents/TEAM.md"
+  assert_contains "$INSTALL_DIR/docs/CODEX_START_PROMPT.md" ".gstack/harness/bin/gstack-harness-readiness"
+  assert_contains "$INSTALL_DIR/docs/CODEX_START_PROMPT.md" ".gstack/harness/bin/gstack-harness-remediate"
+  assert_contains "$INSTALL_DIR/docs/CODEX_START_PROMPT.md" "Problem Handling Agent"
+  assert_contains "$INSTALL_DIR/docs/CODEX_START_PROMPT.md" "docs/CODE_CONTEXT_REPORT.md"
+  assert_contains "$INSTALL_DIR/docs/CODE_CONTEXT_REPORT.md" "gbrain_write_candidates"
+  assert_contains "$INSTALL_DIR/docs/CODE_CONTEXT_REPORT.md" "project/"
+  assert_contains "$INSTALL_DIR/docs/CODE_CONTEXT_REPORT.md" "GitNexus"
+  assert_contains "$INSTALL_DIR/docs/CODEBASE_MAP_REPORT.md" "compatibility pointer"
+  assert_contains "$INSTALL_DIR/init.out" '"code_context_agent": "code-context"'
+  assert_contains "$INSTALL_DIR/init.out" '"code_context_report": "docs/CODE_CONTEXT_REPORT.md"'
+  assert_contains "$INSTALL_DIR/init.out" '"codebase_map_report": "docs/CODEBASE_MAP_REPORT.md"'
+  assert_contains "$INSTALL_DIR/init.out" '"code_context"'
+  assert_contains "$INSTALL_DIR/init.out" '"provider": "gitnexus"'
+  assert_contains "$INSTALL_DIR/init.out" '"config": ".ai-context/project.json"'
+  assert_contains "$INSTALL_DIR/.gstack/usage-runs/index.jsonl" "harness_init"
+  (cd "$INSTALL_DIR" && .gstack/harness/bin/pcm-harness --dry-run --no-start-codex > "$TMP_ROOT/pcm-local.out")
+  assert_contains "$TMP_ROOT/pcm-local.out" "DRY_RUN"
+
+  node -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" "$INSTALL_DIR/.gstack/project-state.json"
+  assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.agents.required_core.includes('problem-handling')" "missing problem-handling required core agent"
+  assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.agents.project_defined.includes('code-context')" "missing code-context project-defined agent"
+  assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.artifacts.problem_handling_report === 'docs/PROBLEM_HANDLING_REPORT.md'" "missing problem handling artifact link"
+  assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.artifacts.foundation_remediation_report === 'docs/FOUNDATION_REMEDIATION_REPORT.md'" "missing foundation remediation artifact link"
+  assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.artifacts.code_context_report === 'docs/CODE_CONTEXT_REPORT.md'" "missing code context report artifact link"
+  assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.artifacts.ai_context_project === '.ai-context/project.json'" "missing ai context project artifact link"
+  assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.quality_gates.code_context === 'missing'" "missing code context gate"
+  assert_json_field "$INSTALL_DIR/.ai-context/project.json" "state.gitnexus.command.length === 1 && state.gitnexus.command[0] === 'gitnexus'" "GitNexus config is not local-first"
+  assert_json_field "$INSTALL_DIR/.ai-context/project.json" "state.gitnexus.fallback_command.join(' ') === 'npx -y gitnexus@latest'" "GitNexus fallback command missing"
+  assert_json_field "$INSTALL_DIR/.ai-context/project.json" "state.gitnexus.prefer_local === true" "GitNexus prefer_local missing"
+  assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.artifacts.system_tuning_report === 'docs/SYSTEM_TUNING_REPORT.md'" "missing system tuning artifact link"
+  assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.artifacts.usage_runs === '.gstack/usage-runs'" "missing usage runs artifact link"
+  assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.artifacts.foundation_readiness_runner === '.gstack/harness/bin/gstack-harness-readiness'" "missing readiness runner artifact link"
+  assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.usage && state.usage.latest_event === 'harness_init'" "missing latest usage run state"
+
+  local usage_count
+  usage_count="$(find "$INSTALL_DIR/.gstack/usage-runs" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
+  [ "$usage_count" -ge 1 ] || fail "expected at least one usage run JSON"
+
+  (cd "$INSTALL_DIR" && node scripts/ai-context-bridge.mjs status > "$TMP_ROOT/code-context-status.out")
+  assert_contains "$INSTALL_DIR/docs/CODE_CONTEXT_REPORT.md" "operation: status"
+  assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.code_context && state.code_context.provider === 'gitnexus'" "bridge status did not update code context state"
+
+  "$INSTALL_DIR/.gstack/harness/bin/gstack-harness-remediate" --target "$INSTALL_DIR" > "$TMP_ROOT/remediate.out"
+  assert_contains "$TMP_ROOT/remediate.out" "Foundation remediation status:"
+  assert_contains "$INSTALL_DIR/docs/FOUNDATION_REMEDIATION_REPORT.md" "foundation_remediation:"
+  assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.foundation && state.foundation.remediation" "remediation did not update foundation state"
+  "$INSTALL_DIR/.gstack/harness/bin/gstack-harness-readiness" --target "$INSTALL_DIR" > "$TMP_ROOT/readiness.out"
+  assert_contains "$TMP_ROOT/readiness.out" '"status"'
+
+  pass "fresh install writes protocol, agent team, pcm-harness, reports, managed block, usage run, and valid JSON"
+}
+
+test_readiness_invariants() {
+  local indexed_dir="$TMP_ROOT/indexed"
+  mkdir -p "$indexed_dir"
+  printf '%s\n' '{"scripts":{"test":"echo ok","dev":"echo dev","lint":"echo lint","typecheck":"echo type"}}' > "$indexed_dir/package.json"
+  git -C "$indexed_dir" init -q
+  git -C "$indexed_dir" config user.email test@example.com
+  git -C "$indexed_dir" config user.name Test
+  printf '%s\n' "hello" > "$indexed_dir/README.md"
+  git -C "$indexed_dir" add README.md package.json
+  git -C "$indexed_dir" commit -q -m init
+  local head
+  head="$(git -C "$indexed_dir" rev-parse HEAD)"
+  mkdir -p "$indexed_dir/.gitnexus"
+  printf '{"lastCommit":"%s","indexedAt":"2026-05-03T00:00:00Z","stats":{"files":2,"nodes":1,"edges":0}}\n' "$head" > "$indexed_dir/.gitnexus/meta.json"
+
+  GSTACK_HARNESS_REGISTRY="$TMP_ROOT/projects.jsonl" PATH="$FAKE_BIN:$PATH" "$INIT" --target "$indexed_dir" --project-id indexed --mode app --no-start-codex > "$indexed_dir/init.out"
+  assert_json_field "$indexed_dir/.gstack/project-state.json" "state.quality_gates.code_context === 'ready'" "indexed GitNexus state did not become ready"
+  assert_json_field "$indexed_dir/.gstack/project-state.json" "state.code_context && state.code_context.provider === 'gitnexus'" "indexed GitNexus state missing provider"
+  assert_json_field "$indexed_dir/.gstack/project-state.json" "state.runtime.test === 'npm test'" "package test script was not detected without jq"
+  assert_json_field "$indexed_dir/.gstack/project-state.json" "state.runtime.dev === 'npm run dev'" "package dev script was not detected without jq"
+  assert_contains "$indexed_dir/docs/CODE_CONTEXT_REPORT.md" "Status: ready"
+
+  local empty_gbrain_dir="$TMP_ROOT/empty-gbrain"
+  local empty_fake_bin="$TMP_ROOT/empty-fake-bin"
+  mkdir -p "$empty_gbrain_dir" "$empty_fake_bin"
+  cat > "$empty_fake_bin/gbrain" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --version) printf 'gbrain-test 0.0.0\n' ;;
+  list) exit 0 ;;
+  query) printf 'query completed\n' ;;
+  put|tag) exit 0 ;;
+  *) exit 0 ;;
+esac
+EOF
+  chmod +x "$empty_fake_bin/gbrain"
+  GSTACK_HARNESS_REGISTRY="$TMP_ROOT/projects.jsonl" PATH="$empty_fake_bin:$PATH" "$INIT" --target "$empty_gbrain_dir" --project-id emptybrain --mode docs-only --no-start-codex > "$empty_gbrain_dir/init.out"
+  assert_json_field "$empty_gbrain_dir/.gstack/project-state.json" "state.foundation.gbrain === 'empty'" "empty gbrain was not detected"
+  assert_json_field "$empty_gbrain_dir/.gstack/project-state.json" "state.foundation.readiness === 'partial'" "empty gbrain did not downgrade readiness"
+
+  local repaired_gbrain_dir="$TMP_ROOT/repaired-gbrain"
+  local repaired_fake_bin="$TMP_ROOT/repaired-fake-bin"
+  local repaired_store="$TMP_ROOT/repaired-gbrain-pages.txt"
+  mkdir -p "$repaired_gbrain_dir" "$repaired_fake_bin"
+  cat > "$repaired_fake_bin/gbrain" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}" in
+  --version)
+    printf 'gbrain-test 0.0.0\n'
+    ;;
+  list)
+    [ -f "${GBRAIN_STORE_PATH:?}" ] && cat "$GBRAIN_STORE_PATH" || true
+    ;;
+  query)
+    printf 'query completed\n'
+    ;;
+  put)
+    slug="${2:-}"
+    [ -n "$slug" ] || exit 2
+    touch "$GBRAIN_STORE_PATH"
+    if ! grep -Fxq "$slug" "$GBRAIN_STORE_PATH"; then
+      printf '%s\n' "$slug" >> "$GBRAIN_STORE_PATH"
+    fi
+    cat >/dev/null
+    ;;
+  tag)
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+EOF
+  chmod +x "$repaired_fake_bin/gbrain"
+  GSTACK_HARNESS_REGISTRY="$TMP_ROOT/projects.jsonl" GBRAIN_STORE_PATH="$repaired_store" PATH="$repaired_fake_bin:$PATH" "$INIT" --target "$repaired_gbrain_dir" --project-id repaired --mode docs-only --no-start-codex > "$repaired_gbrain_dir/init.out"
+  assert_json_field "$repaired_gbrain_dir/.gstack/project-state.json" "state.foundation.gbrain === 'ready'" "remediated gbrain was not detected as ready"
+  assert_json_field "$repaired_gbrain_dir/.gstack/project-state.json" "state.foundation.readiness === 'ready'" "remediated gbrain did not restore readiness"
+  assert_json_field "$repaired_gbrain_dir/.gstack/project-state.json" "!state.warnings.includes('gbrain_empty')" "stale gbrain_empty warning survived readiness recheck"
+  assert_json_field "$repaired_gbrain_dir/.gstack/project-state.json" "state.problem_handling_required === false" "ready foundation incorrectly required problem handling"
+
+  pass "readiness invariants keep reports, JSON state, gbrain status, and runtime detection aligned"
+}
+
+test_usage_registry_failure_is_nonfatal() {
+  local registry_dir="$TMP_ROOT/registry"
+  mkdir -p "$registry_dir/.gstack" "$TMP_ROOT/not-a-directory"
+  printf '%s\n' '{"project_id":"registry","artifacts":{}}' > "$registry_dir/.gstack/project-state.json"
+  GSTACK_HARNESS_REGISTRY="$TMP_ROOT/not-a-directory" "$SCRIPT_DIR/gstack-harness-record-run" --target "$registry_dir" --event registry_failure --status completed --warning test_warning > "$TMP_ROOT/registry-record.out"
+  assert_contains "$TMP_ROOT/registry-record.out" ".gstack/usage-runs/"
+  assert_json_field "$registry_dir/.gstack/project-state.json" "state.warnings.includes('test_warning')" "record-run did not merge explicit warning into state"
+  assert_json_field "$registry_dir/.gstack/project-state.json" "state.warnings.includes('usage_global_registry_write_failed')" "record-run did not downgrade registry failure to warning"
+
+  pass "usage recorder keeps local run success when global registry append fails"
+}
+
+test_reinit_preserves_runtime_state() {
+  mkdir -p "$PRESERVE_DIR/.gstack" "$PRESERVE_DIR/docs"
+
+  node <<'NODE' > "$PRESERVE_DIR/.gstack/project-state.json"
+const state = {
+  phase: "maintenance",
+  last_completed_agent: "System Tuning Agent",
+  warnings: ["gbrain_query_timeout"],
+  problem_handling: {
+    status: "completed",
+    issue_id: "gbrain_query_timeout"
+  },
+  system_tuning: {
+    active_issue: "harness-gbrain-timeout-state-template",
+    capability_gaps: [
+      { id: "harness-gbrain-timeout-state-template", status: "open" }
+    ]
+  },
+  next_recommended_agent: "System Tuning Agent",
+  next_recommended_recipe: "R14 System / Agent Capability Tuning"
+};
+process.stdout.write(JSON.stringify(state, null, 2) + "\n");
+NODE
+
+  printf '%s\n' "REAL PROBLEM REPORT" > "$PRESERVE_DIR/docs/PROBLEM_HANDLING_REPORT.md"
+  printf '%s\n' "REAL TUNING REPORT" > "$PRESERVE_DIR/docs/SYSTEM_TUNING_REPORT.md"
+
+  run_init "$PRESERVE_DIR"
+
+  assert_contains "$PRESERVE_DIR/docs/PROBLEM_HANDLING_REPORT.md" "REAL PROBLEM REPORT"
+  assert_contains "$PRESERVE_DIR/docs/SYSTEM_TUNING_REPORT.md" "REAL TUNING REPORT"
+  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Phase: maintenance"
+  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Last completed agent: System Tuning Agent"
+  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Next recommended recipe: R14 System / Agent Capability Tuning"
+  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Problem handling: completed (docs/PROBLEM_HANDLING_REPORT.md)"
+
+  node -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" "$PRESERVE_DIR/.gstack/project-state.json"
+  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.phase === 'maintenance'" "re-init did not preserve phase"
+  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.last_completed_agent === 'System Tuning Agent'" "re-init did not preserve last completed agent"
+  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.next_recommended_recipe === 'R14 System / Agent Capability Tuning'" "re-init did not preserve next recipe"
+  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "!state.warnings.includes('gbrain_query_timeout')" "re-init did not clear stale readiness warning"
+  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.problem_handling && state.problem_handling.issue_id === 'gbrain_query_timeout'" "re-init did not preserve problem handling state"
+  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.system_tuning && state.system_tuning.active_issue === 'harness-gbrain-timeout-state-template'" "re-init did not preserve system tuning state"
+  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.usage && state.usage.latest_event === 'harness_init'" "re-init did not record latest usage run"
+
+  pass "re-init preserves reports and operating state while refreshing foundation state"
+}
+
+test_usage_report() {
+  local report="$TMP_ROOT/usage-report.md"
+  local summary="$TMP_ROOT/usage-summary.json"
+
+  "$SCRIPT_DIR/gstack-harness-usage-report" --registry "$TMP_ROOT/projects.jsonl" --output "$report" --json-output "$summary" > "$TMP_ROOT/usage-report.out"
+  GSTACK_HARNESS_REGISTRY="$TMP_ROOT/projects.jsonl" "$INSTALL_DIR/.gstack/harness/bin/gstack-harness-usage-report" --stdout > "$TMP_ROOT/usage-report-local.out"
+
+  assert_file "$report"
+  assert_file "$summary"
+  assert_contains "$report" "Usage Feedback Report"
+  assert_contains "$TMP_ROOT/usage-report-local.out" "Usage Feedback Report"
+  assert_contains "$report" "Usage runs found"
+  node -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" "$summary"
+  assert_json_field "$summary" "state.usage_runs_found >= 2" "usage report did not aggregate recorded runs"
+
+  pass "usage report aggregates registered target-project run records"
+}
+
+test_report_timer_installer() {
+  local unit_dir="$TMP_ROOT/systemd-user"
+  local runner_dir="$TMP_ROOT/runner"
+  local report="$TMP_ROOT/timer-report.md"
+
+  "$SCRIPT_DIR/gstack-harness-enable-report-timer" \
+    --unit-dir "$unit_dir" \
+    --runner-dir "$runner_dir" \
+    --registry "$TMP_ROOT/projects.jsonl" \
+    --output "$report" \
+    --no-enable > "$TMP_ROOT/timer.out"
+
+  assert_file "$runner_dir/gstack-harness-usage-report.sh"
+  assert_file "$unit_dir/gstack-harness-usage-report.service"
+  assert_file "$unit_dir/gstack-harness-usage-report.timer"
+  assert_contains "$runner_dir/gstack-harness-usage-report.sh" "gstack-harness-usage-report"
+  assert_contains "$unit_dir/gstack-harness-usage-report.service" "Type=oneshot"
+  assert_contains "$unit_dir/gstack-harness-usage-report.timer" "OnBootSec=5min"
+  assert_contains "$unit_dir/gstack-harness-usage-report.timer" "OnUnitActiveSec=1h"
+  assert_contains "$TMP_ROOT/timer.out" "Enabled GStack Harness usage report timer."
+
+  local local_unit_dir="$TMP_ROOT/local-systemd-user"
+  local local_runner_dir="$TMP_ROOT/local-runner"
+  GSTACK_HARNESS_REGISTRY="$TMP_ROOT/projects.jsonl" "$INSTALL_DIR/.gstack/harness/bin/gstack-harness-enable-report-timer" \
+    --unit-dir "$local_unit_dir" \
+    --runner-dir "$local_runner_dir" \
+    --output "$TMP_ROOT/local-timer-report.md" \
+    --no-enable > "$TMP_ROOT/local-timer.out"
+
+  assert_file "$local_runner_dir/gstack-harness-usage-report.sh"
+  assert_contains "$local_runner_dir/gstack-harness-usage-report.sh" "$TEMPLATE_ROOT/bin/gstack-harness-usage-report"
+
+  pass "report timer installer writes user systemd units without enabling real timers"
+}
+
+main() {
+  log "GStack Harness self-test"
+  require_node
+  setup_fake_tools
+  bash -n "$INIT"
+  bash -n "$SCRIPT_DIR/pcm-harness"
+  bash -n "$SCRIPT_DIR/gstack-harness-record-run"
+  bash -n "$SCRIPT_DIR/gstack-harness-usage-report"
+  bash -n "$SCRIPT_DIR/gstack-harness-enable-report-timer"
+  bash -n "$SCRIPT_DIR/gstack-harness-remediate"
+  bash -n "$SCRIPT_DIR/gstack-harness-readiness"
+  node --check "$TEMPLATE_ROOT/scripts/ai-context-bridge.mjs" >/dev/null
+  pass "init script syntax"
+
+  test_fresh_install
+  test_readiness_invariants
+  test_usage_registry_failure_is_nonfatal
+  test_reinit_preserves_runtime_state
+  test_usage_report
+  test_report_timer_installer
+
+  log "OK all harness self-tests passed"
+}
+
+main "$@"
