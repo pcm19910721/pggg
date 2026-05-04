@@ -11,12 +11,13 @@
     "prefer_local": true,
     "owns": ["source_code", "symbols", "imports", "calls", "execution_flows", "impact", "diff_analysis"],
     "embeddings": true,
-    "skip_agents_md": true
+    "skip_agents_md": true,
+    "no_stats": true
   },
   "gbrain": {
     "owns": ["memory", "decisions", "state", "summaries", "reports", "handoffs"],
     "store_gitnexus_outputs": "summaries_only",
-    "never_import_paths": ["src/", "app/", "lib/", "packages/", "tests/", ".gitnexus/", ".understand-anything/"],
+    "never_import_paths": ["src/", "app/", "lib/", "packages/", "tests/", ".gitnexus/", ".understand-anything/", "docs/agents/"],
     "pages": {
       "overview": "project/gstack-multiagent/overview",
       "state": "project/gstack-multiagent/state",

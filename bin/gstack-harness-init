@@ -138,6 +138,17 @@ is_readiness_warning() {
   esac
 }
 
+is_completed_gate() {
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    accepted|complete|completed|done|passed|passing|ready|released|shipped)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 detect_gstack_root() {
   for root in \
     "$HOME/.claude/skills/gstack" \
@@ -435,10 +446,12 @@ fi
 
 GIT_STATUS="missing"
 BRANCH="none"
+GIT_REMOTE_URL=""
 if git -C "$TARGET_DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
   GIT_STATUS="ready"
   BRANCH="$(git -C "$TARGET_DIR" branch --show-current 2>/dev/null || true)"
   BRANCH="${BRANCH:-unknown}"
+  GIT_REMOTE_URL="$(git -C "$TARGET_DIR" config --get remote.origin.url 2>/dev/null || true)"
 fi
 
 GBRAIN_STATUS="unavailable"
@@ -716,6 +729,28 @@ TYPECHECK_COMMAND="$(preserve_runtime_value "${TYPECHECK_COMMAND:-}" "$EXISTING_
 LOCAL_URL="$(preserve_runtime_value "${LOCAL_URL:-}" "$EXISTING_LOCAL_URL")"
 PRODUCTION_URL="$(preserve_runtime_value "${PRODUCTION_URL:-}" "$EXISTING_PRODUCTION_URL")"
 
+RELEASE_BLOCKERS=()
+[ -z "$GIT_REMOTE_URL" ] && RELEASE_BLOCKERS+=("no_remote_repository")
+case "${PRODUCTION_URL:-}" in
+  ""|not_required)
+    RELEASE_BLOCKERS+=("no_deploy_target")
+    ;;
+esac
+RELEASE_STATUS="not_started"
+RELEASE_NEXT_ACTION="run /setup-deploy before /ship or /land-and-deploy"
+DEPLOYMENT_GATE="$EXISTING_DEPLOYMENT_GATE"
+if [ "${#RELEASE_BLOCKERS[@]}" -gt 0 ] && ! is_completed_gate "$EXISTING_DEPLOYMENT_GATE"; then
+  RELEASE_STATUS="blocked_by_environment"
+  DEPLOYMENT_GATE="blocked"
+  RELEASE_NEXT_ACTION="configure a remote repository and deploy target before release"
+elif is_completed_gate "$EXISTING_DEPLOYMENT_GATE"; then
+  RELEASE_STATUS="completed"
+  RELEASE_NEXT_ACTION="none"
+elif [ "$EXISTING_DEPLOYMENT_GATE" = "blocked" ]; then
+  RELEASE_STATUS="blocked_by_environment"
+  DEPLOYMENT_GATE="blocked"
+fi
+
 copy_file "HARNESS_PRODUCT_USAGE.md" "HARNESS_PRODUCT_USAGE.md"
 copy_file "GSTACK_SKILL_REGISTRY.md" "GSTACK_SKILL_REGISTRY.md"
 copy_file "WORKFLOW_RECIPES.md" "WORKFLOW_RECIPES.md"
@@ -733,10 +768,11 @@ copy_file "bin/gstack-harness-usage-report" ".gstack/harness/bin/gstack-harness-
 copy_file "bin/gstack-harness-enable-report-timer" ".gstack/harness/bin/gstack-harness-enable-report-timer"
 copy_file "bin/gstack-harness-remediate" ".gstack/harness/bin/gstack-harness-remediate"
 copy_file "bin/gstack-harness-readiness" ".gstack/harness/bin/gstack-harness-readiness"
+copy_file "bin/gstack-harness-agent-status" ".gstack/harness/bin/gstack-harness-agent-status"
 copy_file "scripts/ai-context-bridge.mjs" "scripts/ai-context-bridge.mjs"
 
 if [ "$DRY_RUN" -ne 1 ]; then
-  chmod +x "$TARGET_DIR/.gstack/harness/bin/pcm-harness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-record-run" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-usage-report" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-enable-report-timer" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" "$TARGET_DIR/scripts/ai-context-bridge.mjs" 2>/dev/null || true
+  chmod +x "$TARGET_DIR/.gstack/harness/bin/pcm-harness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-record-run" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-usage-report" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-enable-report-timer" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" "$TARGET_DIR/scripts/ai-context-bridge.mjs" 2>/dev/null || true
 fi
 
 AGENT_TEAM_CONTENT="$(cat <<EOF
@@ -899,12 +935,13 @@ AI_CONTEXT_PROJECT_JSON="$(cat <<EOF
     "prefer_local": true,
     "owns": ["source_code", "symbols", "imports", "calls", "execution_flows", "impact", "diff_analysis"],
     "embeddings": true,
-    "skip_agents_md": true
+    "skip_agents_md": true,
+    "no_stats": true
   },
   "gbrain": {
     "owns": ["memory", "decisions", "state", "summaries", "reports", "handoffs"],
     "store_gitnexus_outputs": "summaries_only",
-    "never_import_paths": ["src/", "app/", "lib/", "packages/", "tests/", ".gitnexus/", ".understand-anything/"],
+    "never_import_paths": ["src/", "app/", "lib/", "packages/", "tests/", ".gitnexus/", ".understand-anything/", "docs/agents/"],
     "pages": {
       "overview": "project/$PROJECT_ID/overview",
       "state": "project/$PROJECT_ID/state",
@@ -996,6 +1033,7 @@ GITNEXUSIGNORE_CONTENT="$(cat <<'EOF'
 .gitnexus/
 .ai-context/
 .understand-anything/
+docs/agents/
 EOF
 )"
 
@@ -1106,7 +1144,13 @@ PROJECT_STATE_CONTENT="$(cat <<EOF
 - Review: $EXISTING_REVIEW_GATE
 - Security: $EXISTING_SECURITY_GATE
 - Performance: $EXISTING_PERFORMANCE_GATE
-- Deployment: $EXISTING_DEPLOYMENT_GATE
+- Deployment: $DEPLOYMENT_GATE
+
+## Release
+
+- Release readiness: $RELEASE_STATUS
+- Release blockers: ${RELEASE_BLOCKERS[*]:-none}
+- Release next action: $RELEASE_NEXT_ACTION
 
 ## Gate Evidence
 
@@ -1243,6 +1287,9 @@ const ownedLabels = [
   'Typecheck command',
   'Local URL',
   'Production URL',
+  'Release readiness',
+  'Release blockers',
+  'Release next action',
   'Foundation Readiness',
   'Code Context',
 ];
@@ -1517,7 +1564,14 @@ PROJECT_STATE_JSON="$(cat <<EOF
     "review": "$(json_escape "$EXISTING_REVIEW_GATE")",
     "security": "$(json_escape "$EXISTING_SECURITY_GATE")",
     "performance": "$(json_escape "$EXISTING_PERFORMANCE_GATE")",
-    "deployment": "$(json_escape "$EXISTING_DEPLOYMENT_GATE")"
+    "deployment": "$(json_escape "$DEPLOYMENT_GATE")"
+  },
+  "release": {
+    "status": "$(json_escape "$RELEASE_STATUS")",
+    "blockers": $(json_array "${RELEASE_BLOCKERS[@]}"),
+    "remote_url": "$(json_escape "$GIT_REMOTE_URL")",
+    "production_url": "$(json_escape "${PRODUCTION_URL:-}")",
+    "next_action": "$(json_escape "$RELEASE_NEXT_ACTION")"
   },
   "artifacts": {
     "foundation_readiness_report": "docs/FOUNDATION_READINESS_REPORT.md",
@@ -1536,6 +1590,7 @@ PROJECT_STATE_JSON="$(cat <<EOF
     "optional_ua_diff_overlay": ".understand-anything/diff-overlay.json",
     "usage_runs": ".gstack/usage-runs",
     "foundation_readiness_runner": ".gstack/harness/bin/gstack-harness-readiness",
+    "agent_status_runner": ".gstack/harness/bin/gstack-harness-agent-status",
     "usage_report_timer": ".gstack/harness/bin/gstack-harness-enable-report-timer"
   },
   "usage": {
@@ -1612,6 +1667,14 @@ next.quality_gates = {
   foundation_readiness: generated.quality_gates?.foundation_readiness,
   code_context: generated.quality_gates?.code_context,
 };
+const completedGates = new Set(['accepted', 'complete', 'completed', 'done', 'passed', 'passing', 'ready', 'released', 'shipped']);
+if (
+  generated.release?.status === 'blocked_by_environment'
+  && !completedGates.has(String(enrichedExisting.quality_gates?.deployment || '').toLowerCase())
+) {
+  next.quality_gates.deployment = generated.quality_gates?.deployment;
+  next.release = generated.release;
+}
 next.artifacts = {
   ...(enrichedExisting.artifacts || {}),
   ...(generated.artifacts || {}),
@@ -1692,6 +1755,9 @@ if [ "$DRY_RUN" -ne 1 ] && [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-
     timeout 45s "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" --target "$TARGET_DIR" --mode "$EFFECTIVE_MODE" > "$TARGET_DIR/.gstack/readiness-last.json" || true
   else
     printf 'Foundation remediation not run: readiness is ready.\n' > "$TARGET_DIR/.gstack/remediation-last.out"
+  fi
+  if [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" ]; then
+    "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" --target "$TARGET_DIR" --event harness_init >/dev/null 2>&1 || true
   fi
   if command -v node >/dev/null 2>&1; then
     FINAL_STATE_INFO="$(node -e 'const fs=require("fs"); const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const vals=[s.foundation?.readiness||"",s.foundation?.gbrain||"",s.foundation?.gbrain_query||"",s.foundation?.runtime||"",s.next_recommended_agent||"",s.next_recommended_recipe||"",s.quality_gates?.code_context||""]; console.log(vals.map(v=>String(v).replace(/[\t\n\r]/g," ")).join("\t"));' "$TARGET_DIR/.gstack/project-state.json" 2>/dev/null || true)"
@@ -1872,6 +1938,8 @@ SUMMARY_JSON="$(cat <<EOF
   "readiness_runner": ".gstack/harness/bin/gstack-harness-readiness",
   "remediation_report": "docs/FOUNDATION_REMEDIATION_REPORT.md",
   "remediation_runner": ".gstack/harness/bin/gstack-harness-remediate",
+  "agent_status_report": "docs/AGENTS_STATUS.md",
+  "agent_status_dir": "docs/agents",
   "project_state_json": ".gstack/project-state.json",
   "agent_team": ".gstack/harness/agents/TEAM.md",
   "code_context_agent": "code-context",

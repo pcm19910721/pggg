@@ -11,7 +11,8 @@ Usage:
 Scope:
   - Creates missing harness directories and protocol placeholders.
   - Restores harness-owned bridge/recorder files from the template source when available.
-  - Runs scripts/ai-context-bridge.mjs status to refresh Code Context artifacts.
+  - Runs scripts/ai-context-bridge.mjs sync-gbrain when possible to refresh
+    Code Context artifacts and project-scoped gbrain memory pages.
   - Updates docs/FOUNDATION_REMEDIATION_REPORT.md and .gstack/project-state.json.
   - Records a structured usage run when the recorder is available.
 
@@ -175,6 +176,19 @@ copy_from_template_if_missing() {
   record_file "$dest_rel" "restored from template"
 }
 
+copy_from_template_if_missing_any() {
+  local dest_rel="$1"
+  shift
+  local src_rel
+  for src_rel in "$@"; do
+    if [ -n "$TEMPLATE_SOURCE" ] && [ -f "$TEMPLATE_SOURCE/$src_rel" ]; then
+      copy_from_template_if_missing "$src_rel" "$dest_rel"
+      return 0
+    fi
+  done
+  record_warning "template_source_missing_for_$dest_rel"
+}
+
 ensure_dir ".gstack"
 ensure_dir ".gstack/harness"
 ensure_dir ".gstack/harness/bin"
@@ -188,6 +202,7 @@ ensure_dir "scripts"
 copy_from_template_if_missing "scripts/ai-context-bridge.mjs" "scripts/ai-context-bridge.mjs"
 copy_from_template_if_missing "bin/gstack-harness-record-run" ".gstack/harness/bin/gstack-harness-record-run"
 copy_from_template_if_missing "bin/gstack-harness-readiness" ".gstack/harness/bin/gstack-harness-readiness"
+copy_from_template_if_missing_any ".gstack/harness/bin/gstack-harness-agent-status" "bin/gstack-harness-agent-status" ".gstack/harness/bin/gstack-harness-agent-status"
 
 write_if_missing ".gstack/usage-runs/README.md" "# Usage Runs
 
@@ -271,6 +286,7 @@ const config = {
     owns: ['source_code', 'symbols', 'imports', 'calls', 'execution_flows', 'impact', 'diff_analysis'],
     embeddings: true,
     skip_agents_md: true,
+    no_stats: true,
   },
   gbrain: {
     owns: ['memory', 'decisions', 'state', 'summaries', 'reports', 'handoffs'],
@@ -324,6 +340,7 @@ seed_gbrain_page() {
   local slug="$1"
   local title="$2"
   local body="$3"
+  local page_type="${4:-project}"
   if ! command -v gbrain >/dev/null 2>&1 || ! gbrain --version >/dev/null 2>&1; then
     record_warning "gbrain_unavailable"
     return 0
@@ -338,14 +355,67 @@ seed_gbrain_page() {
     return 0
   fi
   local gbrain_rc
-  if timeout 8s gbrain put "$slug" <<EOF >/dev/null 2>&1
+  local content
+  local project_uid
+  local project_stable_key
+  local remote_url
+  project_stable_key="$TARGET_DIR"
+  if git -C "$TARGET_DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
+    remote_url="$(git -C "$TARGET_DIR" config --get remote.origin.url 2>/dev/null || true)"
+    [ -n "$remote_url" ] && project_stable_key="$remote_url"
+  fi
+  project_uid="$(printf '%s' "$project_stable_key" | sha256sum | cut -c1-16)"
+  if [ "${slug#project/}" != "$slug" ]; then
+    content="$(cat <<EOF
+---
+type: $page_type
+title: "$title"
+project_id: "$PROJECT_ID"
+project_uid: "$project_uid"
+repo_path: "$TARGET_DIR"
+tags:
+  - scope:project
+  - project:$PROJECT_ID
+  - project_uid:$project_uid
+  - type:$page_type
+  - source:harness
+  - status:active
+---
+
 # $title
 
 $body
 EOF
-  then
-    timeout 4s gbrain tag "$slug" scope:project >/dev/null 2>&1 || true
-    timeout 4s gbrain tag "$slug" "project:$PROJECT_ID" >/dev/null 2>&1 || true
+)"
+  else
+    content="$(cat <<EOF
+---
+type: $page_type
+title: "$title"
+tags:
+  - scope:system
+  - type:$page_type
+  - source:harness
+  - status:active
+---
+
+# $title
+
+$body
+EOF
+)"
+  fi
+  if timeout 8s env -u OPENAI_API_KEY GBRAIN_NO_AUTO_HOOKS=1 gbrain put "$slug" --content "$content" --no-embed --no-auto-hooks >/dev/null 2>&1; then
+    if [ "${slug#project/}" != "$slug" ]; then
+      timeout 4s gbrain tag "$slug" scope:project >/dev/null 2>&1 || true
+      timeout 4s gbrain tag "$slug" "project:$PROJECT_ID" >/dev/null 2>&1 || true
+      timeout 4s gbrain tag "$slug" "project_uid:$project_uid" >/dev/null 2>&1 || true
+    else
+      timeout 4s gbrain tag "$slug" scope:system >/dev/null 2>&1 || true
+    fi
+    timeout 4s gbrain tag "$slug" "type:$page_type" >/dev/null 2>&1 || true
+    timeout 4s gbrain tag "$slug" source:harness >/dev/null 2>&1 || true
+    timeout 4s gbrain tag "$slug" status:active >/dev/null 2>&1 || true
     record_action "seed_gbrain_page" "$slug" "seeded core gbrain page"
   else
     gbrain_rc="$?"
@@ -357,22 +427,36 @@ EOF
   fi
 }
 
-seed_gbrain_page "system/orchestration-principles" "Orchestration Principles" "Use gstack skills as the capability layer, GitNexus as the current code-fact layer, and gbrain as durable memory. Do not rewrite gstack skill internals from target projects."
-seed_gbrain_page "system/harness-product-usage" "Harness Product Usage" "The normal user path is cd target-project && pcm-harness. The harness installs protocol files, runs readiness, routes remediation, records usage, and hands off to Orchestrator."
-seed_gbrain_page "system/capability-gap-backlog" "Capability Gap Backlog" "Record repeated warnings, blockers, and handoff failures here so System Tuning can turn them into harness or workflow improvements."
-seed_gbrain_page "project/$PROJECT_ID/overview" "Project Overview: $PROJECT_ID" "Harness project id: $PROJECT_ID. Target path: $TARGET_DIR."
-seed_gbrain_page "project/$PROJECT_ID/state" "Project State: $PROJECT_ID" "Local machine-readable state lives in .gstack/project-state.json. Human-readable state lives in PROJECT_STATE.md."
-seed_gbrain_page "project/$PROJECT_ID/foundation-readiness" "Foundation Readiness: $PROJECT_ID" "Readiness is diagnosed by .gstack/harness/bin/gstack-harness-readiness and summarized in docs/FOUNDATION_READINESS_REPORT.md."
-seed_gbrain_page "project/$PROJECT_ID/code-context" "Code Context: $PROJECT_ID" "GitNexus is the default Code Context provider. UA is optional for dashboard, onboarding, domain graph, and fallback."
-seed_gbrain_page "project/$PROJECT_ID/quality-gates" "Quality Gates: $PROJECT_ID" "Quality gates are stored in .gstack/project-state.json and evidenced by reports under docs/."
+seed_gbrain_page "system/orchestration-principles" "Orchestration Principles" "Use gstack skills as the capability layer, GitNexus as the current code-fact layer, and gbrain as durable memory. Do not rewrite gstack skill internals from target projects." "concept"
+seed_gbrain_page "system/harness-product-usage" "Harness Product Usage" "The normal user path is cd target-project && pcm-harness. The harness installs protocol files, runs readiness, routes remediation, records usage, and hands off to Orchestrator." "concept"
+seed_gbrain_page "system/capability-gap-backlog" "Capability Gap Backlog" "Record repeated warnings, blockers, and handoff failures here so System Tuning can turn them into harness or workflow improvements." "concept"
+seed_gbrain_page "project/$PROJECT_ID/overview" "Project Overview: $PROJECT_ID" "Harness project id: $PROJECT_ID. Target path: $TARGET_DIR" "overview"
+seed_gbrain_page "project/$PROJECT_ID/state" "Project State: $PROJECT_ID" "Local machine-readable state lives in .gstack/project-state.json. Human-readable state lives in PROJECT_STATE.md." "state"
+seed_gbrain_page "project/$PROJECT_ID/foundation-readiness" "Foundation Readiness: $PROJECT_ID" "Readiness is diagnosed by .gstack/harness/bin/gstack-harness-readiness and summarized in docs/FOUNDATION_READINESS_REPORT.md." "foundation-readiness"
+seed_gbrain_page "project/$PROJECT_ID/code-context" "Code Context: $PROJECT_ID" "GitNexus is the default Code Context provider. UA is optional for dashboard, onboarding, domain graph, and fallback." "code-context"
+seed_gbrain_page "project/$PROJECT_ID/quality-gates" "Quality Gates: $PROJECT_ID" "Quality gates are stored in .gstack/project-state.json and evidenced by reports under docs/." "quality-gates"
 
 if [ "$SKIP_CODE_CONTEXT" -ne 1 ] && [ -f "$TARGET_DIR/scripts/ai-context-bridge.mjs" ] && [ -f "$TARGET_DIR/.ai-context/project.json" ]; then
   if [ "$DRY_RUN" -eq 1 ]; then
-    log "DRY_RUN node scripts/ai-context-bridge.mjs status"
+    log "DRY_RUN node scripts/ai-context-bridge.mjs sync-gbrain"
+  elif command -v gbrain >/dev/null 2>&1 && gbrain --version >/dev/null 2>&1 && (cd "$TARGET_DIR" && node scripts/ai-context-bridge.mjs sync-gbrain > "$TMP_DIR/sync-gbrain.out" 2> "$TMP_DIR/sync-gbrain.err"); then
+    SYNC_STATUS="$(json_field "$TMP_DIR/sync-gbrain.out" "state.status" "unknown")"
+    record_action "sync_gbrain_project_memory" "project/$PROJECT_ID" "ran GitNexus bridge sync-gbrain ($SYNC_STATUS)"
+    if [ "$SYNC_STATUS" != "synced" ]; then
+      while IFS= read -r sync_warning; do
+        [ -n "$sync_warning" ] && record_warning "$sync_warning"
+      done < <(node -e 'const fs=require("fs"); try { const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); for (const w of (s.warnings||[])) console.log(String(w)); } catch {}' "$TMP_DIR/sync-gbrain.out")
+      record_file ".ai-context/gbrain-fallback" "captured gbrain fallback artifacts from bridge sync-gbrain"
+    fi
+    record_file "docs/CODE_CONTEXT_REPORT.md" "refreshed by bridge sync-gbrain"
+    record_file ".ai-context/gitnexus-status.json" "refreshed by bridge sync-gbrain"
+    record_file ".ai-context/gitnexus-index.json" "refreshed by bridge sync-gbrain"
+    record_file ".ai-context/gitnexus-index.md" "refreshed by bridge sync-gbrain"
   elif (cd "$TARGET_DIR" && node scripts/ai-context-bridge.mjs status > "$TMP_DIR/code-context-status.out" 2> "$TMP_DIR/code-context-status.err"); then
     record_action "refresh_code_context_status" "docs/CODE_CONTEXT_REPORT.md" "ran GitNexus bridge status"
     record_file "docs/CODE_CONTEXT_REPORT.md" "refreshed by bridge status"
     record_file ".ai-context/gitnexus-status.json" "refreshed by bridge status"
+    record_warning "gbrain_project_memory_sync_failed"
   else
     record_warning "code_context_status_failed"
   fi
@@ -475,12 +559,30 @@ const transientWarnings = new Set([
   'code_context_status_failed',
   'gbrain_seed_failed',
   'gbrain_seed_timeout',
+  'gbrain_project_memory_missing',
+  'gbrain_project_memory_stale',
+  'gbrain_project_memory_sync_failed',
 ]);
 const existingWarnings = (Array.isArray(state.warnings) ? state.warnings : [])
   .filter((warning) => !transientWarnings.has(String(warning)));
 const warnings = unique([...existingWarnings, ...warningsFromRun]);
 const hardBlockers = remainingBlockers.filter((blocker) =>
   ['gbrain_unavailable', 'gstack_unavailable'].includes(String(blocker)));
+
+function hasCompletedAcceptance(state) {
+  const gates = state.quality_gates || {};
+  const completed = new Set(['accepted', 'complete', 'completed', 'done', 'passed', 'ready', 'shipped', 'released']);
+  const phase = String(state.phase || '').toLowerCase();
+  if (['acceptance', 'release', 'released', 'completed', 'maintenance'].includes(phase)) return true;
+  if (completed.has(String(state.status || '').toLowerCase())) return true;
+  return ['health', 'browser_qa', 'review', 'security', 'performance', 'deployment']
+    .some((key) => completed.has(String(gates[key] || '').toLowerCase()));
+}
+
+function isCompletedGate(value) {
+  return ['accepted', 'complete', 'completed', 'done', 'passed', 'passing', 'ready', 'released', 'shipped']
+    .includes(String(value || '').toLowerCase());
+}
 
 let remediationStatus;
 if (hardBlockers.length) {
@@ -495,6 +597,9 @@ if (hardBlockers.length) {
   warnings.includes('code_context_status_failed') ||
   warnings.includes('gbrain_seed_failed') ||
   warnings.includes('gbrain_seed_timeout') ||
+  warnings.includes('gbrain_project_memory_missing') ||
+  warnings.includes('gbrain_project_memory_stale') ||
+  warnings.includes('gbrain_project_memory_sync_failed') ||
   warnings.includes('gbrain_core_pages_missing')
 ) {
   remediationStatus = 'partial';
@@ -522,7 +627,9 @@ nextState.workspace_mode = nextState.workspace_mode || 'target_project';
 nextState.template_source = nextState.template_source || process.env.TEMPLATE_SOURCE || '';
 nextState.target = nextState.target || target;
 nextState.phase = nextState.phase || 'foundation';
-nextState.last_completed_agent = 'Foundation Remediation Agent';
+nextState.last_completed_agent = hasCompletedAcceptance(state)
+  ? state.last_completed_agent || nextState.last_completed_agent || 'Foundation Remediation Agent'
+  : 'Foundation Remediation Agent';
 
 nextState.foundation = {
   ...(state.foundation || {}),
@@ -538,6 +645,17 @@ nextState.quality_gates = {
   foundation_readiness: nextReadiness,
   code_context: state.quality_gates?.code_context || 'missing',
 };
+const releaseBlockers = Array.isArray(state.release?.blockers) ? state.release.blockers : [];
+const existingDeployment = state.quality_gates?.deployment || 'not_started';
+if (releaseBlockers.length && !isCompletedGate(existingDeployment)) {
+  nextState.quality_gates.deployment = 'blocked';
+  nextState.release = {
+    ...(state.release || {}),
+    status: 'blocked_by_environment',
+    blockers: releaseBlockers,
+    next_action: state.release?.next_action || 'configure a remote repository and deploy target before release',
+  };
+}
 nextState.artifacts = {
   ...(state.artifacts || {}),
   foundation_readiness_report: 'docs/FOUNDATION_READINESS_REPORT.md',
@@ -548,6 +666,9 @@ nextState.artifacts = {
   gitnexus_index: '.ai-context/gitnexus-index.md',
   gitnexus_runs: '.ai-context/runs',
   usage_runs: '.gstack/usage-runs',
+  agents_status_report: 'docs/AGENTS_STATUS.md',
+  agents_status_dir: 'docs/agents',
+  agent_status_runner: '.gstack/harness/bin/gstack-harness-agent-status',
 };
 nextState.blockers = remainingBlockers;
 nextState.warnings = warnings;
@@ -602,8 +723,9 @@ if (!dryRun) {
 
   if (fs.existsSync(projectStateMdPath)) {
     let md = fs.readFileSync(projectStateMdPath, 'utf8');
+    const preserveLastCompleted = hasCompletedAcceptance(state);
     const replacements = [
-      [/^- Last completed agent: .*$/m, '- Last completed agent: Foundation Remediation Agent'],
+      [/^- Last completed agent: .*$/m, preserveLastCompleted ? null : '- Last completed agent: Foundation Remediation Agent'],
       [/^- Next recommended agent: .*$/m, `- Next recommended agent: ${nextAgent}`],
       [/^- Next recommended recipe: .*$/m, `- Next recommended recipe: ${nextRecipe}`],
       [/^- Last updated: .*$/m, `- Last updated: ${date}`],
@@ -612,6 +734,7 @@ if (!dryRun) {
       [/^- Foundation Readiness: .*$/m, `- Foundation Readiness: ${nextReadiness}`],
     ];
     for (const [pattern, value] of replacements) {
+      if (value === null) continue;
       if (pattern.test(md)) md = md.replace(pattern, value);
     }
     if (!/^- Remediation report: /m.test(md)) {
@@ -639,6 +762,9 @@ REMEDIATION_STATUS="$(json_field "$META_FILE" "state.status" "unknown")"
 if [ "$DRY_RUN" -ne 1 ]; then
   if [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" ]; then
     timeout 45s "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" --target "$TARGET_DIR" > "$TARGET_DIR/.gstack/readiness-last.json" || true
+  fi
+  if [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" ]; then
+    "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" --target "$TARGET_DIR" --event foundation_remediation >/dev/null 2>&1 || true
   fi
   RECORDER="$TARGET_DIR/.gstack/harness/bin/gstack-harness-record-run"
   if [ -x "$RECORDER" ]; then

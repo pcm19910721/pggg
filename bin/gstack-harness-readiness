@@ -237,6 +237,7 @@ GBRAIN_MEMORY_MISSING="$GBRAIN_MEMORY_MISSING" \
 GBRAIN_MEMORY_STALE="$GBRAIN_MEMORY_STALE" \
 GBRAIN_QUERY_STATUS="$GBRAIN_QUERY_STATUS" \
 GBRAIN_QUERY_EVIDENCE="$GBRAIN_QUERY_EVIDENCE" \
+GIT_REMOTE_URL="$(git -C "$TARGET_DIR" config --get remote.origin.url 2>/dev/null || true)" \
 node <<'NODE'
 const fs = require('fs');
 const path = require('path');
@@ -486,6 +487,11 @@ function mergeRuntimeValue(nextValue, previousValue) {
   return nextValue || '';
 }
 
+function isCompletedGate(value) {
+  return ['accepted', 'complete', 'completed', 'done', 'passed', 'passing', 'ready', 'released', 'shipped']
+    .includes(String(value || '').toLowerCase());
+}
+
 nextState.runtime = {
   ...(state.runtime || {}),
   install: mergeRuntimeValue(runtime.install, state.runtime?.install),
@@ -496,10 +502,29 @@ nextState.runtime = {
   local_url: mergeRuntimeValue(runtime.local_url, state.runtime?.local_url),
   production_url: mergeRuntimeValue(runtime.production_url, state.runtime?.production_url),
 };
+const releaseBlockers = [];
+const remoteUrl = env.GIT_REMOTE_URL || state.release?.remote_url || '';
+if (!remoteUrl) releaseBlockers.push('no_remote_repository');
+if (!nextState.runtime.production_url || nextState.runtime.production_url === 'not_required') releaseBlockers.push('no_deploy_target');
+const existingDeployment = state.quality_gates?.deployment || 'not_started';
+const deploymentGate = releaseBlockers.length && !isCompletedGate(existingDeployment) ? 'blocked' : existingDeployment;
+nextState.release = {
+  ...(state.release || {}),
+  status: releaseBlockers.length && !isCompletedGate(existingDeployment)
+    ? 'blocked_by_environment'
+    : (isCompletedGate(existingDeployment) ? 'completed' : state.release?.status || 'not_started'),
+  blockers: releaseBlockers,
+  remote_url: remoteUrl,
+  production_url: nextState.runtime.production_url || '',
+  next_action: releaseBlockers.length
+    ? 'configure a remote repository and deploy target before release'
+    : state.release?.next_action || 'none',
+};
 nextState.quality_gates = {
   ...(state.quality_gates || {}),
   foundation_readiness: verdict,
   code_context: codeContextStatus,
+  deployment: deploymentGate,
 };
 nextState.artifacts = {
   ...(state.artifacts || {}),
@@ -511,6 +536,9 @@ nextState.artifacts = {
   gitnexus_index: '.ai-context/gitnexus-index.md',
   gitnexus_runs: '.ai-context/runs',
   usage_runs: '.gstack/usage-runs',
+  agents_status_report: 'docs/AGENTS_STATUS.md',
+  agents_status_dir: 'docs/agents',
+  agent_status_runner: '.gstack/harness/bin/gstack-harness-agent-status',
 };
 nextState.blockers = unique([...blockers]);
 nextState.warnings = unique([
@@ -608,3 +636,7 @@ if (!env.DRY_RUN || env.DRY_RUN !== '1') {
 process.stdout.write(JSON.stringify(summary, null, 2) + '\n');
 process.exitCode = verdict === 'blocked' ? 1 : 0;
 NODE
+
+if [ "$DRY_RUN" -ne 1 ] && [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" ]; then
+  "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" --target "$TARGET_DIR" --event foundation_readiness >/dev/null 2>&1 || true
+fi

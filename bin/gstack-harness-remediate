@@ -176,6 +176,19 @@ copy_from_template_if_missing() {
   record_file "$dest_rel" "restored from template"
 }
 
+copy_from_template_if_missing_any() {
+  local dest_rel="$1"
+  shift
+  local src_rel
+  for src_rel in "$@"; do
+    if [ -n "$TEMPLATE_SOURCE" ] && [ -f "$TEMPLATE_SOURCE/$src_rel" ]; then
+      copy_from_template_if_missing "$src_rel" "$dest_rel"
+      return 0
+    fi
+  done
+  record_warning "template_source_missing_for_$dest_rel"
+}
+
 ensure_dir ".gstack"
 ensure_dir ".gstack/harness"
 ensure_dir ".gstack/harness/bin"
@@ -189,6 +202,7 @@ ensure_dir "scripts"
 copy_from_template_if_missing "scripts/ai-context-bridge.mjs" "scripts/ai-context-bridge.mjs"
 copy_from_template_if_missing "bin/gstack-harness-record-run" ".gstack/harness/bin/gstack-harness-record-run"
 copy_from_template_if_missing "bin/gstack-harness-readiness" ".gstack/harness/bin/gstack-harness-readiness"
+copy_from_template_if_missing_any ".gstack/harness/bin/gstack-harness-agent-status" "bin/gstack-harness-agent-status" ".gstack/harness/bin/gstack-harness-agent-status"
 
 write_if_missing ".gstack/usage-runs/README.md" "# Usage Runs
 
@@ -272,11 +286,12 @@ const config = {
     owns: ['source_code', 'symbols', 'imports', 'calls', 'execution_flows', 'impact', 'diff_analysis'],
     embeddings: true,
     skip_agents_md: true,
+    no_stats: true,
   },
   gbrain: {
     owns: ['memory', 'decisions', 'state', 'summaries', 'reports', 'handoffs'],
     store_gitnexus_outputs: 'summaries_only',
-    never_import_paths: ['src/', 'app/', 'lib/', 'packages/', 'tests/', '.gitnexus/', '.understand-anything/'],
+    never_import_paths: ['src/', 'app/', 'lib/', 'packages/', 'tests/', '.gitnexus/', '.understand-anything/', 'docs/agents/'],
     pages: {
       overview: `project/${projectId}/overview`,
       state: `project/${projectId}/state`,
@@ -564,6 +579,11 @@ function hasCompletedAcceptance(state) {
     .some((key) => completed.has(String(gates[key] || '').toLowerCase()));
 }
 
+function isCompletedGate(value) {
+  return ['accepted', 'complete', 'completed', 'done', 'passed', 'passing', 'ready', 'released', 'shipped']
+    .includes(String(value || '').toLowerCase());
+}
+
 let remediationStatus;
 if (hardBlockers.length) {
   remediationStatus = 'blocked';
@@ -625,6 +645,17 @@ nextState.quality_gates = {
   foundation_readiness: nextReadiness,
   code_context: state.quality_gates?.code_context || 'missing',
 };
+const releaseBlockers = Array.isArray(state.release?.blockers) ? state.release.blockers : [];
+const existingDeployment = state.quality_gates?.deployment || 'not_started';
+if (releaseBlockers.length && !isCompletedGate(existingDeployment)) {
+  nextState.quality_gates.deployment = 'blocked';
+  nextState.release = {
+    ...(state.release || {}),
+    status: 'blocked_by_environment',
+    blockers: releaseBlockers,
+    next_action: state.release?.next_action || 'configure a remote repository and deploy target before release',
+  };
+}
 nextState.artifacts = {
   ...(state.artifacts || {}),
   foundation_readiness_report: 'docs/FOUNDATION_READINESS_REPORT.md',
@@ -635,6 +666,9 @@ nextState.artifacts = {
   gitnexus_index: '.ai-context/gitnexus-index.md',
   gitnexus_runs: '.ai-context/runs',
   usage_runs: '.gstack/usage-runs',
+  agents_status_report: 'docs/AGENTS_STATUS.md',
+  agents_status_dir: 'docs/agents',
+  agent_status_runner: '.gstack/harness/bin/gstack-harness-agent-status',
 };
 nextState.blockers = remainingBlockers;
 nextState.warnings = warnings;
@@ -728,6 +762,9 @@ REMEDIATION_STATUS="$(json_field "$META_FILE" "state.status" "unknown")"
 if [ "$DRY_RUN" -ne 1 ]; then
   if [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" ]; then
     timeout 45s "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" --target "$TARGET_DIR" > "$TARGET_DIR/.gstack/readiness-last.json" || true
+  fi
+  if [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" ]; then
+    "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" --target "$TARGET_DIR" --event foundation_remediation >/dev/null 2>&1 || true
   fi
   RECORDER="$TARGET_DIR/.gstack/harness/bin/gstack-harness-record-run"
   if [ -x "$RECORDER" ]; then

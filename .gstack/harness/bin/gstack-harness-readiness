@@ -136,6 +136,8 @@ GBRAIN_QUERY_STATUS="not_run"
 GBRAIN_QUERY_EVIDENCE="gbrain unavailable"
 GBRAIN_CORE_PRESENT="0"
 GBRAIN_CORE_MISSING=""
+GBRAIN_MEMORY_MISSING=""
+GBRAIN_MEMORY_STALE=""
 if command -v gbrain >/dev/null 2>&1 && gbrain --version >/dev/null 2>&1; then
   GBRAIN_STATUS="empty"
   if GBRAIN_LIST_OUTPUT="$(timeout 6s gbrain list 2>&1)"; then
@@ -160,6 +162,29 @@ if command -v gbrain >/dev/null 2>&1 && gbrain --version >/dev/null 2>&1; then
     if ! timeout 8s gbrain get "$core_slug" >/dev/null 2>&1; then
       GBRAIN_CORE_PRESENT="0"
       GBRAIN_CORE_MISSING="${GBRAIN_CORE_MISSING}${GBRAIN_CORE_MISSING:+,}$core_slug"
+    fi
+  done
+  CODE_CONTEXT_INDEXED_COMMIT="$(node -e '
+const fs = require("fs");
+try {
+  const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  process.stdout.write(s.last_commit || "");
+} catch {}
+' "$TARGET_DIR/.ai-context/gitnexus-status.json" 2>/dev/null || true)"
+  for memory_slug in \
+    "project/$PROJECT_ID/gitnexus-index" \
+    "project/$PROJECT_ID/architecture" \
+    "project/$PROJECT_ID/hotspots" \
+    "project/$PROJECT_ID/handoff"
+  do
+    if MEMORY_PAGE="$(timeout 8s gbrain get "$memory_slug" 2>/dev/null)"; then
+      if [ -n "$CODE_CONTEXT_INDEXED_COMMIT" ] && [ -n "$MEMORY_PAGE" ] && [ "$memory_slug" = "project/$PROJECT_ID/gitnexus-index" ] && printf '%s\n' "$MEMORY_PAGE" | grep -Fq "type: gitnexus_index"; then
+        if ! printf '%s\n' "$MEMORY_PAGE" | grep -Fq "$CODE_CONTEXT_INDEXED_COMMIT"; then
+          GBRAIN_MEMORY_STALE="${GBRAIN_MEMORY_STALE}${GBRAIN_MEMORY_STALE:+,}$memory_slug"
+        fi
+      fi
+    else
+      GBRAIN_MEMORY_MISSING="${GBRAIN_MEMORY_MISSING}${GBRAIN_MEMORY_MISSING:+,}$memory_slug"
     fi
   done
   if [ "$GBRAIN_PAGES" != "0" ] && [ "$GBRAIN_PAGES" != "unknown" ] && [ "$GBRAIN_CORE_PRESENT" = "1" ]; then
@@ -208,8 +233,11 @@ BRANCH="$BRANCH" \
 GBRAIN_STATUS="$GBRAIN_STATUS" \
 GBRAIN_PAGES="$GBRAIN_PAGES" \
 GBRAIN_CORE_MISSING="$GBRAIN_CORE_MISSING" \
+GBRAIN_MEMORY_MISSING="$GBRAIN_MEMORY_MISSING" \
+GBRAIN_MEMORY_STALE="$GBRAIN_MEMORY_STALE" \
 GBRAIN_QUERY_STATUS="$GBRAIN_QUERY_STATUS" \
 GBRAIN_QUERY_EVIDENCE="$GBRAIN_QUERY_EVIDENCE" \
+GIT_REMOTE_URL="$(git -C "$TARGET_DIR" config --get remote.origin.url 2>/dev/null || true)" \
 node <<'NODE'
 const fs = require('fs');
 const path = require('path');
@@ -357,6 +385,8 @@ function withoutReadinessWarnings(items) {
     'code_context_status_failed',
     'gbrain_seed_failed',
     'gbrain_seed_timeout',
+    'gbrain_project_memory_missing',
+    'gbrain_project_memory_stale',
   ]);
   return items.filter((item) => !readinessWarnings.has(String(item)));
 }
@@ -380,6 +410,8 @@ const warnings = [];
 if (env.GBRAIN_STATUS === 'unavailable') blockers.push('gbrain_unavailable');
 if (env.GBRAIN_STATUS === 'empty') warnings.push('gbrain_empty');
 if (env.GBRAIN_CORE_MISSING) warnings.push('gbrain_core_pages_missing');
+if (env.GBRAIN_MEMORY_MISSING) warnings.push('gbrain_project_memory_missing');
+if (env.GBRAIN_MEMORY_STALE) warnings.push('gbrain_project_memory_stale');
 if (env.GBRAIN_QUERY_STATUS === 'timeout') warnings.push('gbrain_query_timeout');
 if (env.GBRAIN_QUERY_STATUS === 'failed') warnings.push('gbrain_query_failed');
 if (env.GBRAIN_SYNC_MODE === 'off') warnings.push('gbrain_sync_off');
@@ -391,11 +423,24 @@ if (env.BROWSE_STATUS !== 'ready') warnings.push('browse_missing');
 const codeContextStatus = readCodeContextStatus(state);
 let verdict = 'ready';
 if (blockers.length) verdict = 'blocked';
-else if (warnings.includes('gbrain_empty') || warnings.includes('runtime_missing') || warnings.includes('not_git_repo')) verdict = 'partial';
+else if (
+  warnings.includes('gbrain_empty') ||
+  warnings.includes('gbrain_project_memory_missing') ||
+  warnings.includes('gbrain_project_memory_stale') ||
+  warnings.includes('runtime_missing') ||
+  warnings.includes('not_git_repo')
+) verdict = 'partial';
 
 let nextAgent = 'Orchestrator';
 let nextRecipe = 'R0 Restore / Resume Context';
-const remediableWarnings = new Set(['gbrain_empty', 'gbrain_core_pages_missing', 'runtime_missing', 'browse_missing']);
+const remediableWarnings = new Set([
+  'gbrain_empty',
+  'gbrain_core_pages_missing',
+  'gbrain_project_memory_missing',
+  'gbrain_project_memory_stale',
+  'runtime_missing',
+  'browse_missing',
+]);
 const needsFoundationRemediation = verdict === 'blocked' || warnings.some((warning) => remediableWarnings.has(warning));
 if (needsFoundationRemediation) {
   nextAgent = 'Foundation Remediation Agent';
@@ -423,6 +468,8 @@ nextState.foundation = {
   remediation_report: 'docs/FOUNDATION_REMEDIATION_REPORT.md',
   gbrain: env.GBRAIN_STATUS,
   gbrain_pages: env.GBRAIN_PAGES,
+  gbrain_project_memory_missing: env.GBRAIN_MEMORY_MISSING ? env.GBRAIN_MEMORY_MISSING.split(',') : [],
+  gbrain_project_memory_stale: env.GBRAIN_MEMORY_STALE ? env.GBRAIN_MEMORY_STALE.split(',') : [],
   gbrain_query: env.GBRAIN_QUERY_STATUS,
   gstack: env.GSTACK_STATUS,
   project_protocol: 'ready',
@@ -432,20 +479,52 @@ nextState.foundation = {
   last_readiness_check: env.GENERATED_AT,
   problem_handling_required: ['timeout', 'failed'].includes(env.GBRAIN_QUERY_STATUS),
 };
+function mergeRuntimeValue(nextValue, previousValue) {
+  const hasPrevious = previousValue !== undefined && previousValue !== null && previousValue !== '';
+  if (hasPrevious && (nextValue === undefined || nextValue === null || nextValue === '' || nextValue === 'not_required')) {
+    return previousValue;
+  }
+  return nextValue || '';
+}
+
+function isCompletedGate(value) {
+  return ['accepted', 'complete', 'completed', 'done', 'passed', 'passing', 'ready', 'released', 'shipped']
+    .includes(String(value || '').toLowerCase());
+}
+
 nextState.runtime = {
   ...(state.runtime || {}),
-  install: runtime.install,
-  dev: runtime.dev,
-  test: runtime.test,
-  lint: runtime.lint,
-  typecheck: runtime.typecheck,
-  local_url: runtime.local_url,
-  production_url: runtime.production_url,
+  install: mergeRuntimeValue(runtime.install, state.runtime?.install),
+  dev: mergeRuntimeValue(runtime.dev, state.runtime?.dev),
+  test: mergeRuntimeValue(runtime.test, state.runtime?.test),
+  lint: mergeRuntimeValue(runtime.lint, state.runtime?.lint),
+  typecheck: mergeRuntimeValue(runtime.typecheck, state.runtime?.typecheck),
+  local_url: mergeRuntimeValue(runtime.local_url, state.runtime?.local_url),
+  production_url: mergeRuntimeValue(runtime.production_url, state.runtime?.production_url),
+};
+const releaseBlockers = [];
+const remoteUrl = env.GIT_REMOTE_URL || state.release?.remote_url || '';
+if (!remoteUrl) releaseBlockers.push('no_remote_repository');
+if (!nextState.runtime.production_url || nextState.runtime.production_url === 'not_required') releaseBlockers.push('no_deploy_target');
+const existingDeployment = state.quality_gates?.deployment || 'not_started';
+const deploymentGate = releaseBlockers.length && !isCompletedGate(existingDeployment) ? 'blocked' : existingDeployment;
+nextState.release = {
+  ...(state.release || {}),
+  status: releaseBlockers.length && !isCompletedGate(existingDeployment)
+    ? 'blocked_by_environment'
+    : (isCompletedGate(existingDeployment) ? 'completed' : state.release?.status || 'not_started'),
+  blockers: releaseBlockers,
+  remote_url: remoteUrl,
+  production_url: nextState.runtime.production_url || '',
+  next_action: releaseBlockers.length
+    ? 'configure a remote repository and deploy target before release'
+    : state.release?.next_action || 'none',
 };
 nextState.quality_gates = {
   ...(state.quality_gates || {}),
   foundation_readiness: verdict,
   code_context: codeContextStatus,
+  deployment: deploymentGate,
 };
 nextState.artifacts = {
   ...(state.artifacts || {}),
@@ -457,6 +536,9 @@ nextState.artifacts = {
   gitnexus_index: '.ai-context/gitnexus-index.md',
   gitnexus_runs: '.ai-context/runs',
   usage_runs: '.gstack/usage-runs',
+  agents_status_report: 'docs/AGENTS_STATUS.md',
+  agents_status_dir: 'docs/agents',
+  agent_status_runner: '.gstack/harness/bin/gstack-harness-agent-status',
 };
 nextState.blockers = unique([...blockers]);
 nextState.warnings = unique([
@@ -480,6 +562,7 @@ Verdict: ${verdict}
 | Area | Status | Evidence |
 |---|---|---|
 | gbrain | ${env.GBRAIN_STATUS} | pages visible: ${env.GBRAIN_PAGES}; core missing: ${env.GBRAIN_CORE_MISSING || 'none'} |
+| gbrain project memory | ${env.GBRAIN_MEMORY_MISSING || env.GBRAIN_MEMORY_STALE ? 'partial' : env.GBRAIN_STATUS} | missing: ${env.GBRAIN_MEMORY_MISSING || 'none'}; stale: ${env.GBRAIN_MEMORY_STALE || 'none'} |
 | gbrain query | ${env.GBRAIN_QUERY_STATUS} | ${env.GBRAIN_QUERY_EVIDENCE} |
 | gstack | ${env.GSTACK_STATUS} | root: ${env.GSTACK_ROOT || 'not_found'}; skills: ${env.GSTACK_SKILLS} |
 | gstack browse | ${env.BROWSE_STATUS} | ${env.GSTACK_ROOT || 'not_found'}/browse/dist/browse |
@@ -533,6 +616,8 @@ const summary = {
   mode,
   gbrain: env.GBRAIN_STATUS,
   gbrain_core_missing: env.GBRAIN_CORE_MISSING ? env.GBRAIN_CORE_MISSING.split(',') : [],
+  gbrain_project_memory_missing: env.GBRAIN_MEMORY_MISSING ? env.GBRAIN_MEMORY_MISSING.split(',') : [],
+  gbrain_project_memory_stale: env.GBRAIN_MEMORY_STALE ? env.GBRAIN_MEMORY_STALE.split(',') : [],
   gbrain_query: env.GBRAIN_QUERY_STATUS,
   gstack: env.GSTACK_STATUS,
   git: env.GIT_STATUS,
@@ -551,3 +636,7 @@ if (!env.DRY_RUN || env.DRY_RUN !== '1') {
 process.stdout.write(JSON.stringify(summary, null, 2) + '\n');
 process.exitCode = verdict === 'blocked' ? 1 : 0;
 NODE
+
+if [ "$DRY_RUN" -ne 1 ] && [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" ]; then
+  "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" --target "$TARGET_DIR" --event foundation_readiness >/dev/null 2>&1 || true
+fi

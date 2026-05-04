@@ -142,11 +142,12 @@ function defaultConfig(repoPath, projectId) {
       owns: ['source_code', 'symbols', 'imports', 'calls', 'execution_flows', 'impact', 'diff_analysis'],
       embeddings: true,
       skip_agents_md: true,
+      no_stats: true,
     },
     gbrain: {
       owns: ['memory', 'decisions', 'state', 'summaries', 'reports', 'handoffs'],
       store_gitnexus_outputs: 'summaries_only',
-      never_import_paths: ['src/', 'app/', 'lib/', 'packages/', 'tests/', '.gitnexus/', '.understand-anything/'],
+      never_import_paths: ['src/', 'app/', 'lib/', 'packages/', 'tests/', '.gitnexus/', '.understand-anything/', 'docs/agents/'],
       pages: {
         overview: `project/${id}/overview`,
         state: `project/${id}/state`,
@@ -258,6 +259,7 @@ async function ensureGitNexusIgnore() {
     '.gitnexus/',
     '.ai-context/',
     '.understand-anything/',
+    'docs/agents/',
     '',
   ];
   if (!(await exists(filePath))) {
@@ -989,6 +991,206 @@ async function assertNoProjectCollision(config, summary, slugs) {
   }
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function frontmatterBlock(markdown) {
+  const match = String(markdown || '').match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  if (!match) return null;
+  return {
+    full: match[0],
+    body: match[1],
+    rest: String(markdown || '').slice(match[0].length),
+  };
+}
+
+function frontmatterScalar(markdown, key) {
+  const block = frontmatterBlock(markdown);
+  if (!block) return '';
+  const line = block.body.split(/\r?\n/).find((item) => item.startsWith(`${key}:`));
+  if (!line) return '';
+  const raw = line.slice(key.length + 1).trim();
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw.replace(/^['"]|['"]$/g, '');
+  }
+}
+
+function upsertFrontmatterFields(markdown, fields) {
+  const block = frontmatterBlock(markdown);
+  if (!block) {
+    const lines = Object.entries(fields).map(([key, value]) => `${key}: ${yamlScalar(value)}`);
+    return `---\n${lines.join('\n')}\n---\n\n${String(markdown || '').trimStart()}`;
+  }
+
+  const lines = block.body.split(/\r?\n/);
+  for (const [key, value] of Object.entries(fields)) {
+    const nextLine = `${key}: ${yamlScalar(value)}`;
+    const index = lines.findIndex((line) => line.startsWith(`${key}:`));
+    if (index === -1) {
+      lines.push(nextLine);
+    } else {
+      lines[index] = nextLine;
+    }
+  }
+  return `---\n${lines.join('\n')}\n---\n${block.rest}`;
+}
+
+function inferProjectPageType(slug, markdown) {
+  const existing = frontmatterScalar(markdown, 'type');
+  if (existing) return existing;
+  const suffix = String(slug || '').split('/').pop() || 'project-memory';
+  return suffix.replace(/-/g, '_') || 'project_memory';
+}
+
+function repairProjectMemoryMarkdown(slug, markdown, config, summary) {
+  const expectedUid = projectUid(config, summary);
+  const repoPath = summary.repo_path || config.repo_path || '';
+  const remoteUrl = summary.remote_url || '';
+  const existingUid = frontmatterScalar(markdown, 'project_uid');
+  if (existingUid && existingUid !== expectedUid) {
+    return {
+      ok: false,
+      changed: false,
+      reason: `project_uid_mismatch:${existingUid}`,
+    };
+  }
+
+  const frontmatterRepoPath = frontmatterScalar(markdown, 'repo_path');
+  const legacyRepoPath = legacyRepoPathValue(markdown);
+  const existingRepoPath = frontmatterRepoPath || legacyRepoPath;
+  if (existingRepoPath && !samePath(existingRepoPath, repoPath)) {
+    return {
+      ok: false,
+      changed: false,
+      reason: `repo_path_mismatch:${existingRepoPath}`,
+    };
+  }
+
+  const fields = {};
+  if (!frontmatterScalar(markdown, 'type')) fields.type = inferProjectPageType(slug, markdown);
+  if (!frontmatterScalar(markdown, 'project')) fields.project = config.project_id;
+  if (!existingUid) fields.project_uid = expectedUid;
+  if (!frontmatterRepoPath) fields.repo_path = repoPath;
+  if (remoteUrl && !frontmatterScalar(markdown, 'remote_url')) fields.remote_url = remoteUrl;
+  if (!frontmatterBlock(markdown)) {
+    fields.tags = `["scope:project", "project:${config.project_id}", "project_uid:${expectedUid}", "source:gbrain-repair", "status:active"]`;
+  }
+
+  if (!Object.keys(fields).length) {
+    return { ok: true, changed: false, markdown, reason: 'unchanged' };
+  }
+  fields.repaired_at = new Date().toISOString();
+
+  let repaired = upsertFrontmatterFields(markdown, fields);
+  if (fields.tags) {
+    repaired = repaired.replace(`tags: ${yamlScalar(fields.tags)}`, `tags: ${fields.tags}`);
+  }
+  return {
+    ok: true,
+    changed: repaired !== markdown,
+    markdown: repaired,
+    reason: 'repaired_project_identity',
+  };
+}
+
+function projectSlugCandidates(config, args = {}) {
+  const slugs = pageSlugs(config);
+  const configured = Object.values(slugs).filter(Boolean);
+  const requested = args.page
+    ? (Array.isArray(args.page) ? args.page : [args.page])
+    : ['all'];
+  if (!requested.includes('all')) {
+    return requested.map((item) => {
+      if (item.includes('/')) return item;
+      if (!slugs[item]) {
+        throw new Error(`Unknown repair-gbrain page: ${item}. Use a configured page key, a full slug, or all.`);
+      }
+      return slugs[item];
+    });
+  }
+
+  const prefix = `project/${config.project_id}/`;
+  const listed = commandExists('gbrain')
+    ? run('gbrain', ['list'], { timeoutMs: 10000 })
+    : { ok: false, stdout: '', stderr: 'gbrain command not found' };
+  const found = [];
+  if (listed.ok) {
+    const pattern = new RegExp(`\\b${escapeRegExp(prefix)}[^\\s|,)]+`, 'g');
+    for (const line of listed.stdout.split(/\r?\n/)) {
+      const matches = line.match(pattern) || [];
+      for (const match of matches) found.push(match.replace(/[.;:]+$/g, ''));
+    }
+  }
+  return Array.from(new Set([...configured, ...found]));
+}
+
+async function commandRepairGbrain(args = {}) {
+  const config = await loadConfig();
+  const { metaPath, meta } = await readGitNexusMeta(config);
+  const summary = summarizeMeta(config, meta, metaPath);
+  const candidates = projectSlugCandidates(config, args);
+  const repaired = [];
+  const skipped = [];
+  const fallbacks = [];
+  const warnings = [];
+
+  for (const slug of candidates) {
+    const existing = getGbrain(slug, { timeoutMs: 10000 });
+    if (!existing.ok || !existing.stdout.trim()) {
+      skipped.push({ slug, reason: 'missing_or_unreadable' });
+      continue;
+    }
+
+    const result = repairProjectMemoryMarkdown(slug, existing.stdout, config, summary);
+    if (!result.ok) {
+      skipped.push({ slug, reason: result.reason });
+      warnings.push('gbrain_project_memory_collision_skipped');
+      continue;
+    }
+    if (!result.changed) {
+      skipped.push({ slug, reason: result.reason });
+      continue;
+    }
+    if (args.dryRun) {
+      repaired.push({ slug, dry_run: true, reason: result.reason });
+      continue;
+    }
+
+    const write = writeGbrain(slug, result.markdown, { timeoutMs: 30000 });
+    if (!write.ok) {
+      const fallback = await writeGbrainFallback(slug, result.markdown, write.stderr || write.stdout || `gbrain put failed for ${slug}`);
+      fallbacks.push(fallback);
+      warnings.push('gbrain_project_memory_repair_failed');
+      repaired.push({ slug, ok: false, fallback, reason: result.reason });
+    } else {
+      repaired.push({ slug, ok: true, reason: result.reason });
+    }
+  }
+
+  const status = args.dryRun
+    ? 'planned'
+    : (warnings.includes('gbrain_project_memory_repair_failed')
+        ? 'fallback'
+        : (repaired.length ? 'repaired' : 'no_changes'));
+  console.log(JSON.stringify({
+    event: 'repair_gbrain',
+    status,
+    project_id: config.project_id,
+    project_uid: projectUid(config, summary),
+    dry_run: Boolean(args.dryRun),
+    repo_path: summary.repo_path || config.repo_path,
+    remote_url: summary.remote_url,
+    pages_checked: candidates,
+    pages_repaired: repaired,
+    pages_skipped: skipped,
+    warnings: Array.from(new Set(warnings)),
+    fallback_artifacts: fallbacks,
+  }, null, 2));
+}
+
 async function commandStatus() {
   const config = await loadConfig();
   const { metaPath, meta } = await readGitNexusMeta(config);
@@ -1020,6 +1222,7 @@ async function commandRefresh(args) {
     if (config.gitnexus.embeddings && !args.noEmbeddings) analyzeArgs.push('--embeddings');
     analyzeArgs.push('--skills');
     if (config.gitnexus.skip_agents_md !== false) analyzeArgs.push('--skip-agents-md');
+    if (config.gitnexus.no_stats !== false) analyzeArgs.push('--no-stats');
 
     console.log(`Running GitNexus: ${gitNexusCommands(config)[0].join(' ')} ${analyzeArgs.join(' ')}`);
     const result = await runGitNexus(config, analyzeArgs);
@@ -1301,6 +1504,7 @@ function usage() {
   node scripts/ai-context-bridge.mjs status
   node scripts/ai-context-bridge.mjs refresh [--skip-analyze] [--no-embeddings] [--write-gbrain]
   node scripts/ai-context-bridge.mjs sync-gbrain [--dry-run] [--page overview|state|foundation_readiness|code_context|quality_gates|gitnexus_index|architecture|hotspots|handoff|decisions|assumptions|all]
+  node scripts/ai-context-bridge.mjs repair-gbrain [--dry-run] [--page key|slug|all]
   node scripts/ai-context-bridge.mjs postchange [--scope all|staged|unstaged|compare] [--base-ref main] [--impact Symbol] [--write-gbrain]
 `);
 }
@@ -1321,6 +1525,10 @@ async function main() {
         break;
       case 'sync-gbrain':
         await commandSyncGbrain(args);
+        break;
+      case 'repair-gbrain':
+      case 'repair-gbrain-memory':
+        await commandRepairGbrain(args);
         break;
       case 'postchange':
         await commandPostchange(args);

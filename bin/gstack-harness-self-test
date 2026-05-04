@@ -197,6 +197,7 @@ test_fresh_install() {
     ".gstack/harness/bin/gstack-harness-enable-report-timer"
     ".gstack/harness/bin/gstack-harness-remediate"
     ".gstack/harness/bin/gstack-harness-readiness"
+    ".gstack/harness/bin/gstack-harness-agent-status"
     ".ai-context/project.json"
     ".ai-context/FIELD_CONTRACT.md"
     ".ai-context/gitnexus-status.json"
@@ -213,6 +214,11 @@ test_fresh_install() {
     "docs/CODEBASE_MAP_REPORT.md"
     "docs/PROBLEM_HANDLING_REPORT.md"
     "docs/SYSTEM_TUNING_REPORT.md"
+    "docs/AGENTS_STATUS.md"
+    "docs/agents/orchestrator.json"
+    "docs/agents/foundation-readiness.json"
+    "docs/agents/memory-gbrain.json"
+    "docs/agents/release.json"
   )
 
   local rel
@@ -256,7 +262,11 @@ test_fresh_install() {
   assert_json_field "$INSTALL_DIR/.ai-context/project.json" "state.gitnexus.command.length === 1 && state.gitnexus.command[0] === 'gitnexus'" "GitNexus config is not local-first"
   assert_json_field "$INSTALL_DIR/.ai-context/project.json" "state.gitnexus.fallback_command.join(' ') === 'npx -y gitnexus@latest'" "GitNexus fallback command missing"
   assert_json_field "$INSTALL_DIR/.ai-context/project.json" "state.gitnexus.prefer_local === true" "GitNexus prefer_local missing"
+  assert_json_field "$INSTALL_DIR/.ai-context/project.json" "state.gitnexus.no_stats === true" "GitNexus no_stats missing"
   assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.artifacts.system_tuning_report === 'docs/SYSTEM_TUNING_REPORT.md'" "missing system tuning artifact link"
+  assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.artifacts.agents_status_report === 'docs/AGENTS_STATUS.md'" "missing agents status artifact link"
+  assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.release.status === 'blocked_by_environment' && state.quality_gates.deployment === 'blocked'" "project release state was not structured as blocked_by_environment"
+  assert_json_field "$INSTALL_DIR/docs/agents/release.json" "state.status === 'blocked_by_environment' && state.blockers.includes('no_remote_repository') && state.blockers.includes('no_deploy_target')" "release agent did not record blocked_by_environment"
   assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.artifacts.usage_runs === '.gstack/usage-runs'" "missing usage runs artifact link"
   assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.artifacts.foundation_readiness_runner === '.gstack/harness/bin/gstack-harness-readiness'" "missing readiness runner artifact link"
   assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.usage && state.usage.latest_event === 'harness_init'" "missing latest usage run state"
@@ -305,12 +315,31 @@ EOF
   (cd "$INSTALL_DIR" && GBRAIN_CONTENT_DIR="$legacy_content_dir" PATH="$FAKE_BIN:$PATH" node scripts/ai-context-bridge.mjs sync-gbrain --page overview > "$TMP_ROOT/sync-gbrain-legacy.out")
   assert_json_field "$TMP_ROOT/sync-gbrain-legacy.out" "state.event === 'sync_gbrain' && state.status === 'synced' && state.pages_written.some((p) => p.slug === 'project/install/overview')" "sync-gbrain rejected legacy overview path with trailing punctuation"
 
+  cat > "$legacy_content_dir/project__install__overview.md" <<EOF
+---
+type: project
+title: Overview
+tags:
+  - project:install
+  - scope:project
+---
+
+# Project Overview: install
+
+Harness project id: install. Target path: $INSTALL_DIR.
+EOF
+  (cd "$INSTALL_DIR" && GBRAIN_CONTENT_DIR="$legacy_content_dir" PATH="$FAKE_BIN:$PATH" node scripts/ai-context-bridge.mjs repair-gbrain --page overview > "$TMP_ROOT/repair-gbrain.out")
+  assert_json_field "$TMP_ROOT/repair-gbrain.out" "state.event === 'repair_gbrain' && state.status === 'repaired' && state.pages_repaired.some((p) => p.slug === 'project/install/overview')" "repair-gbrain did not repair legacy project memory"
+  assert_contains "$legacy_content_dir/project__install__overview.md" "project_uid:"
+  assert_contains "$legacy_content_dir/project__install__overview.md" "repo_path:"
+
   PATH="$FAKE_BIN:$PATH" "$INSTALL_DIR/.gstack/harness/bin/gstack-harness-remediate" --target "$INSTALL_DIR" > "$TMP_ROOT/remediate.out"
   assert_contains "$TMP_ROOT/remediate.out" "Foundation remediation status:"
   assert_contains "$INSTALL_DIR/docs/FOUNDATION_REMEDIATION_REPORT.md" "foundation_remediation:"
   assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.foundation && state.foundation.remediation" "remediation did not update foundation state"
   PATH="$FAKE_BIN:$PATH" "$INSTALL_DIR/.gstack/harness/bin/gstack-harness-readiness" --target "$INSTALL_DIR" > "$TMP_ROOT/readiness.out"
   assert_contains "$TMP_ROOT/readiness.out" '"status"'
+  assert_json_field "$INSTALL_DIR/docs/agents/foundation-readiness.json" "state.event === 'foundation_readiness' && state.evidence.length > 0" "readiness did not refresh agent status artifacts"
 
   local seed_dir="$TMP_ROOT/seeded"
   local seed_store="$TMP_ROOT/seeded-gbrain-store.txt"
@@ -640,6 +669,7 @@ main() {
   bash -n "$SCRIPT_DIR/gstack-harness-enable-report-timer"
   bash -n "$SCRIPT_DIR/gstack-harness-remediate"
   bash -n "$SCRIPT_DIR/gstack-harness-readiness"
+  bash -n "$SCRIPT_DIR/gstack-harness-agent-status"
   node --check "$TEMPLATE_ROOT/scripts/ai-context-bridge.mjs" >/dev/null
   pass "init script syntax"
 
