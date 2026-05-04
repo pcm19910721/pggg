@@ -11,6 +11,7 @@ Thumbs.db
 
 # Runtime and generated artifacts
 .gitnexus/
+.claude/skills/generated/
 .ai-context/runs/
 .gstack/usage-runs/*.json
 .gstack/usage-runs/index.jsonl
