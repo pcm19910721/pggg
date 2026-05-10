@@ -433,6 +433,7 @@ function withoutReadinessWarnings(items) {
     'gbrain_seed_timeout',
     'gbrain_project_memory_missing',
     'gbrain_project_memory_stale',
+    'gitnexus_detect_changes_critical_due_large_dirty_worktree',
   ]);
   return items.filter((item) => !readinessWarnings.has(String(item)));
 }

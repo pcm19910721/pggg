@@ -5,12 +5,12 @@ project_uid: 446fe734119c27d5
 repo_path: /home/adminpcm/gstack-multiagent
 gitnexus_repo: gstack-multiagent
 remote_url: ""
-last_commit: c291739b273c260dc6ab7a7e5a75fdea34a3a6a5
-indexed_at: 2026-05-10T08:10:24.015Z
+last_commit: ebc651774158058aa072cd39fac572eded9e7adc
+indexed_at: 2026-05-10T08:42:03.137Z
 files: 38
-nodes: 839
-edges: 1360
-communities: 16
+nodes: 838
+edges: 1362
+communities: 15
 processes: 73
 embeddings: 0
 vector_status: unknown
@@ -25,17 +25,17 @@ source: .gitnexus/meta.json
 - GitNexus repo: gstack-multiagent
 - Repo path: /home/adminpcm/gstack-multiagent
 - Branch: main
-- Git HEAD: 211a7648265a0a48eeab09a99cea8482c3cfb198
-- Indexed commit: c291739b273c260dc6ab7a7e5a75fdea34a3a6a5
-- Indexed at: 2026-05-10T08:10:24.015Z
-- Stale: yes
+- Git HEAD: ebc651774158058aa072cd39fac572eded9e7adc
+- Indexed commit: ebc651774158058aa072cd39fac572eded9e7adc
+- Indexed at: 2026-05-10T08:42:03.137Z
+- Stale: no
 
 ## Stats
 
 - Files: 38
-- Symbols/nodes: 839
-- Edges: 1360
-- Communities: 16
+- Symbols/nodes: 838
+- Edges: 1362
+- Communities: 15
 - Processes: 73
 - Embeddings: 0
 

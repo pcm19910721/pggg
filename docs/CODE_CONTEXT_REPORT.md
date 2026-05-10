@@ -1,28 +1,28 @@
 # Code Context Report
 
-Generated: 2026-05-10T08:38:48.196Z
+Generated: 2026-05-10T08:48:59.601Z
 Project: gstack-multiagent
-Status: stale
+Status: ready
 
 ## Latest Code Context
 
 ```yaml
 code_context:
-  status: stale
+  status: ready
   provider: gitnexus
   operation: sync-gbrain
-  generated_at: 2026-05-10T08:38:48.196Z
+  generated_at: 2026-05-10T08:48:59.601Z
   repo: gstack-multiagent
   repo_path: /home/adminpcm/gstack-multiagent
   branch: main
-  git_head: 211a7648265a0a48eeab09a99cea8482c3cfb198
+  git_head: ebc651774158058aa072cd39fac572eded9e7adc
   indexed: true
-  stale: true
-  indexed_at: 2026-05-10T08:10:24.015Z
-  indexed_commit: c291739b273c260dc6ab7a7e5a75fdea34a3a6a5
+  stale: false
+  indexed_at: 2026-05-10T08:42:03.137Z
+  indexed_commit: ebc651774158058aa072cd39fac572eded9e7adc
   files: 38
-  nodes: 839
-  edges: 1360
+  nodes: 838
+  edges: 1362
   run_id: ""
   risk: ""
   detect_risk: ""
@@ -50,14 +50,14 @@ code_context:
 ## Summary
 
 - Provider: GitNexus
-- Status: stale
+- Status: ready
 - Operation: sync-gbrain
 - Repo: gstack-multiagent
 - Branch: main
 - Indexed: yes
-- Stale: yes
-- Indexed commit: c291739b273c260dc6ab7a7e5a75fdea34a3a6a5
-- Git HEAD: 211a7648265a0a48eeab09a99cea8482c3cfb198
+- Stale: no
+- Indexed commit: ebc651774158058aa072cd39fac572eded9e7adc
+- Git HEAD: ebc651774158058aa072cd39fac572eded9e7adc
 
 ## Write Policy
 

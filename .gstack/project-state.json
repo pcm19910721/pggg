@@ -21,7 +21,7 @@
     "memory_policy": "ready",
     "problem_handling_required": false,
     "gbrain_pages": "50",
-    "last_readiness_check": "2026-05-10T16:11:54+08:00",
+    "last_readiness_check": "2026-05-10T16:48:38+08:00",
     "last_remediation_at": "2026-05-03T13:30:02+08:00",
     "remediation_actions": [
       {
@@ -110,7 +110,7 @@
   },
   "quality_gates": {
     "foundation_readiness": "ready",
-    "code_context": "stale",
+    "code_context": "ready",
     "health": "unknown",
     "browser_qa": "not_run",
     "windows_qa": "skipped",
@@ -186,26 +186,24 @@
     "capability_gaps": []
   },
   "blockers": [],
-  "warnings": [
-    "gitnexus_detect_changes_critical_due_large_dirty_worktree"
-  ],
+  "warnings": [],
   "problem_handling_required": false,
   "next_recommended_agent": "Orchestrator",
   "next_recommended_recipe": "R0 Restore / Resume Context",
   "code_context": {
     "provider": "gitnexus",
-    "status": "stale",
+    "status": "ready",
     "operation": "sync-gbrain",
     "repo": "gstack-multiagent",
     "branch": "main",
     "indexed": true,
-    "stale": true,
-    "git_head": "211a7648265a0a48eeab09a99cea8482c3cfb198",
-    "indexed_commit": "c291739b273c260dc6ab7a7e5a75fdea34a3a6a5",
-    "indexed_at": "2026-05-10T08:10:24.015Z",
+    "stale": false,
+    "git_head": "ebc651774158058aa072cd39fac572eded9e7adc",
+    "indexed_commit": "ebc651774158058aa072cd39fac572eded9e7adc",
+    "indexed_at": "2026-05-10T08:42:03.137Z",
     "latest_run": null,
     "latest_risk": null,
-    "updated_at": "2026-05-10T08:38:48.198Z"
+    "updated_at": "2026-05-10T08:48:59.603Z"
   },
   "release": {
     "status": "blocked_by_environment",
