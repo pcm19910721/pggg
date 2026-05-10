@@ -164,6 +164,47 @@ detect_gstack_root() {
   return 1
 }
 
+detect_gbrain_bin() {
+  if command -v gbrain >/dev/null 2>&1; then
+    command -v gbrain
+    return 0
+  fi
+  if [ -x "$HOME/.bun/bin/gbrain" ]; then
+    printf '%s\n' "$HOME/.bun/bin/gbrain"
+    return 0
+  fi
+  return 1
+}
+
+detect_bun_bin() {
+  if command -v bun >/dev/null 2>&1; then
+    command -v bun
+    return 0
+  fi
+  for candidate in \
+    "${BUN_INSTALL:-}/bin/bun" \
+    "$HOME/.bun/bin/bun" \
+    "/usr/local/bin/bun" \
+    "/opt/homebrew/bin/bun" \
+    "/usr/bin/bun"
+  do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+activate_gbrain_path() {
+  local gbrain_bin="$1"
+  local bun_bin=""
+  PATH="$(dirname "$gbrain_bin"):$PATH"
+  if bun_bin="$(detect_bun_bin 2>/dev/null)"; then
+    PATH="$(dirname "$bun_bin"):$PATH"
+  fi
+}
+
 has_file() {
   [ -f "$1" ] || [ -d "$1" ]
 }
@@ -458,10 +499,12 @@ GBRAIN_STATUS="unavailable"
 GBRAIN_PAGES="0"
 GBRAIN_QUERY_STATUS="not_run"
 GBRAIN_QUERY_EVIDENCE="gbrain unavailable"
-if command -v gbrain >/dev/null 2>&1; then
-  if gbrain --version >/dev/null 2>&1; then
+GBRAIN_BIN=""
+if GBRAIN_BIN="$(detect_gbrain_bin 2>/dev/null)"; then
+  activate_gbrain_path "$GBRAIN_BIN"
+  if "$GBRAIN_BIN" --version >/dev/null 2>&1; then
     GBRAIN_STATUS="ready"
-    if GBRAIN_LIST_OUTPUT="$(timeout 6s gbrain list 2>&1)"; then
+    if GBRAIN_LIST_OUTPUT="$(timeout 6s "$GBRAIN_BIN" list 2>&1)"; then
       if [ -n "$GBRAIN_LIST_OUTPUT" ]; then
         GBRAIN_PAGES="$(printf '%s\n' "$GBRAIN_LIST_OUTPUT" | wc -l | tr -d ' ')"
       else
@@ -470,7 +513,7 @@ if command -v gbrain >/dev/null 2>&1; then
     else
       GBRAIN_PAGES="unknown"
     fi
-    if GBRAIN_QUERY_OUTPUT="$(timeout 20s gbrain query "gbrain healthcheck project memory" --no-expand --limit 1 2>&1)"; then
+    if GBRAIN_QUERY_OUTPUT="$(timeout 20s "$GBRAIN_BIN" query "gbrain healthcheck project memory" --no-expand --limit 1 2>&1)"; then
       GBRAIN_QUERY_STATUS="ready"
       GBRAIN_QUERY_EVIDENCE="health query completed"
     else
@@ -769,10 +812,13 @@ copy_file "bin/gstack-harness-enable-report-timer" ".gstack/harness/bin/gstack-h
 copy_file "bin/gstack-harness-remediate" ".gstack/harness/bin/gstack-harness-remediate"
 copy_file "bin/gstack-harness-readiness" ".gstack/harness/bin/gstack-harness-readiness"
 copy_file "bin/gstack-harness-agent-status" ".gstack/harness/bin/gstack-harness-agent-status"
+copy_file "bin/gstack-harness-schedule" ".gstack/harness/bin/gstack-harness-schedule"
 copy_file "scripts/ai-context-bridge.mjs" "scripts/ai-context-bridge.mjs"
+copy_file "scripts/gstack-scheduler.mjs" "scripts/gstack-scheduler.mjs"
+copy_file "docs/SCHEDULER_MODEL.md" "docs/SCHEDULER_MODEL.md"
 
 if [ "$DRY_RUN" -ne 1 ]; then
-  chmod +x "$TARGET_DIR/.gstack/harness/bin/pcm-harness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-record-run" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-usage-report" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-enable-report-timer" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" "$TARGET_DIR/scripts/ai-context-bridge.mjs" 2>/dev/null || true
+  chmod +x "$TARGET_DIR/.gstack/harness/bin/pcm-harness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-record-run" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-usage-report" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-enable-report-timer" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-schedule" "$TARGET_DIR/scripts/ai-context-bridge.mjs" "$TARGET_DIR/scripts/gstack-scheduler.mjs" 2>/dev/null || true
 fi
 
 AGENT_TEAM_CONTENT="$(cat <<EOF
@@ -1745,6 +1791,14 @@ EOF
 
 write_file "docs/FOUNDATION_READINESS_REPORT.md" "$READINESS_REPORT"
 
+if [ "$DRY_RUN" -ne 1 ] && [ "$GBRAIN_STATUS" = "ready" ] && [ -f "$TARGET_DIR/scripts/ai-context-bridge.mjs" ] && [ -f "$TARGET_DIR/.ai-context/project.json" ]; then
+  if (cd "$TARGET_DIR" && timeout 90s node scripts/ai-context-bridge.mjs sync-gbrain > "$TARGET_DIR/.gstack/sync-gbrain-last.json" 2> "$TARGET_DIR/.gstack/sync-gbrain-last.err"); then
+    :
+  else
+    log "warning: initial gbrain project memory sync skipped or timed out"
+  fi
+fi
+
 if [ "$DRY_RUN" -ne 1 ] && [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" ]; then
   timeout 45s "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" --target "$TARGET_DIR" --mode "$EFFECTIVE_MODE" > "$TARGET_DIR/.gstack/readiness-last.json" || true
   INITIAL_READINESS="$(node -e 'const fs=require("fs"); try { const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(s.foundation?.readiness || "unknown"); } catch { process.stdout.write("unknown"); }' "$TARGET_DIR/.gstack/project-state.json" 2>/dev/null || printf 'unknown')"
@@ -1768,11 +1822,21 @@ if [ "$DRY_RUN" -ne 1 ] && [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-
     RUNTIME_STATUS="${RUNTIME_STATUS:-unknown}"
     NEXT_AGENT="${NEXT_AGENT:-Orchestrator}"
     NEXT_RECIPE="${NEXT_RECIPE:-R0 Restore / Resume Context}"
+    if [ "$GBRAIN_STATUS" = "ready" ] && [ -f "$TARGET_DIR/scripts/ai-context-bridge.mjs" ] && [ -f "$TARGET_DIR/.ai-context/project.json" ]; then
+      (cd "$TARGET_DIR" && timeout 90s node scripts/ai-context-bridge.mjs sync-gbrain > "$TARGET_DIR/.gstack/sync-gbrain-last.json" 2> "$TARGET_DIR/.gstack/sync-gbrain-last.err") || true
+    fi
   fi
 fi
 
 CODEX_START_PROMPT="$(cat <<EOF
-按 PROJECT_STATE.md、CLAUDE.md、HARNESS_PRODUCT_USAGE.md 和 ORCHESTRATOR_RUNBOOK.md 接管这个项目，先判断下一步 recipe。
+按 PROJECT_STATE.md、CLAUDE.md、HARNESS_PRODUCT_USAGE.md 和 ORCHESTRATOR_RUNBOOK.md 轻量接管这个项目，先判断下一步 recipe。
+
+轻量接管原则：
+
+- 接管只恢复导航状态，不恢复全部项目上下文。
+- 默认只读取足够判断“现在在哪、卡在哪、下一步去哪”的最小状态。
+- 不要展开完整代码图、长报告、长历史或大段 gbrain 内容。
+- 只有进入具体任务时，才按任务展开代码、报告、gbrain 细节和 GitNexus 图谱。
 
 请严格遵守：
 
@@ -1783,12 +1847,12 @@ CODEX_START_PROMPT="$(cat <<EOF
 5. 读取 docs/PROBLEM_HANDLING_REPORT.md 和 docs/SYSTEM_TUNING_REPORT.md。
 6. 读取 .ai-context/project.json 和 docs/CODE_CONTEXT_REPORT.md；docs/CODEBASE_MAP_REPORT.md 只是旧名兼容指针。
 7. 读取 HARNESS_PRODUCT_USAGE.md、GSTACK_SKILL_REGISTRY.md、WORKFLOW_RECIPES.md、ORCHESTRATOR_RUNBOOK.md。
-8. 如果 gbrain 可用，先读取 project/$PROJECT_ID/overview、state、foundation-readiness、code-context、quality-gates、gitnexus-index、architecture、hotspots、handoff；如果缺失或 stale，运行 node scripts/ai-context-bridge.mjs sync-gbrain 后再复查。
-9. 代码理解、产品判断、实现、review 或 incident 定位前，优先使用 Code Context Agent 的 GitNexus 流程：先跑 node scripts/ai-context-bridge.mjs status；如 stale 且依赖图谱准确，再 refresh；形成稳定摘要后跑 sync-gbrain。UA 只作为 dashboard/onboarding/domain/fallback 增强。
+8. 如果 gbrain 可用，轻量读取 project/$PROJECT_ID/state 和 project/$PROJECT_ID/handoff；只检查 overview、foundation-readiness、code-context、quality-gates、gitnexus-index、architecture、hotspots 是否缺失或 stale，不要展开大段内容。需要刷新时只报告建议，除非用户要求，不要自动 sync。
+9. 代码理解、产品判断、实现、review 或 incident 定位前，优先使用 Code Context Agent 的 GitNexus 流程：先跑 node scripts/ai-context-bridge.mjs status；如 stale 且依赖图谱准确，再 refresh；形成稳定摘要后跑 sync-gbrain。接管阶段只检查 stale，不展开完整图谱。UA 只作为 dashboard/onboarding/domain/fallback 增强。
 10. 如果 gbrain query 遇到 PGLite lock 或 timeout，重试一次，仍失败就派发 Problem Handling Agent。
 11. 不要重写 gstack skill 本体。
 12. Foundation Readiness 如果是 unknown/stale，先跑 .gstack/harness/bin/gstack-harness-readiness --target "$TARGET_DIR"。如果是 partial/blocked，先跑 .gstack/harness/bin/gstack-harness-remediate --target "$TARGET_DIR"，再回到 readiness 复检。
-13. 先输出当前 Foundation Readiness、blockers/warnings、推荐 recipe、推荐 agent 和原因。
+13. 先输出当前 phase、Foundation Readiness、blockers/warnings、推荐 recipe、推荐 agent、是否需要刷新 memory/code context，以及简短原因。
 14. 本轮开始时可以用 .gstack/harness/bin/gstack-harness-record-run --event session_start --status in_progress 记录快照。
 15. 完成状态更新后必须用 .gstack/harness/bin/gstack-harness-record-run --event session_end --status completed 记录 usage run；如有卡点、用户纠正、能力缺口、warning 或 blocker，把对应参数带上。
 16. 除非我明确要求，不要开始业务代码修改。
@@ -1809,7 +1873,7 @@ EOF
 write_file "docs/CODEX_START_PROMPT.md" "$CODEX_START_PROMPT"
 
 if [ "$GBRAIN_STATUS" = "ready" ] && [ "$DRY_RUN" -ne 1 ]; then
-  if timeout 8s gbrain get "project/$PROJECT_ID/overview" >/dev/null 2>&1; then
+  if timeout 8s "$GBRAIN_BIN" get "project/$PROJECT_ID/overview" >/dev/null 2>&1; then
     :
   else
     PROJECT_STABLE_KEY="$TARGET_DIR"
@@ -1857,11 +1921,11 @@ $FOUNDATION_VERDICT
 $TARGET_DIR
 EOF
 )"
-  if timeout 30s env -u OPENAI_API_KEY GBRAIN_NO_AUTO_HOOKS=1 gbrain put "project/$PROJECT_ID/overview" --content "$OVERVIEW_CONTENT" --no-embed --no-auto-hooks >/dev/null 2>&1; then
-    timeout 10s gbrain tag "project/$PROJECT_ID/overview" scope:project >/dev/null 2>&1 || true
-    timeout 10s gbrain tag "project/$PROJECT_ID/overview" "project:$PROJECT_ID" >/dev/null 2>&1 || true
-    timeout 10s gbrain tag "project/$PROJECT_ID/overview" type:overview >/dev/null 2>&1 || true
-    timeout 10s gbrain tag "project/$PROJECT_ID/overview" status:active >/dev/null 2>&1 || true
+  if timeout 30s env -u OPENAI_API_KEY GBRAIN_NO_AUTO_HOOKS=1 "$GBRAIN_BIN" put "project/$PROJECT_ID/overview" --content "$OVERVIEW_CONTENT" --no-embed --no-auto-hooks >/dev/null 2>&1; then
+    timeout 10s "$GBRAIN_BIN" tag "project/$PROJECT_ID/overview" scope:project >/dev/null 2>&1 || true
+    timeout 10s "$GBRAIN_BIN" tag "project/$PROJECT_ID/overview" "project:$PROJECT_ID" >/dev/null 2>&1 || true
+    timeout 10s "$GBRAIN_BIN" tag "project/$PROJECT_ID/overview" type:overview >/dev/null 2>&1 || true
+    timeout 10s "$GBRAIN_BIN" tag "project/$PROJECT_ID/overview" status:active >/dev/null 2>&1 || true
   else
     log "warning: gbrain overview update skipped or timed out"
   fi

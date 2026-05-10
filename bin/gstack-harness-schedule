@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEMPLATE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+INSTALLED_ROOT="$(cd "$SCRIPT_DIR/../../.." 2>/dev/null && pwd || true)"
+
+if [ -f "$TEMPLATE_ROOT/scripts/gstack-scheduler.mjs" ]; then
+  exec node "$TEMPLATE_ROOT/scripts/gstack-scheduler.mjs" "$@"
+fi
+
+if [ -n "$INSTALLED_ROOT" ] && [ -f "$INSTALLED_ROOT/scripts/gstack-scheduler.mjs" ]; then
+  exec node "$INSTALLED_ROOT/scripts/gstack-scheduler.mjs" "$@"
+fi
+
+echo "ERROR: missing scripts/gstack-scheduler.mjs" >&2
+exit 1

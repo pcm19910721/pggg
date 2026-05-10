@@ -74,6 +74,47 @@ GENERATED_AT="$(date -Iseconds)"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gstack-readiness-XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
+detect_gbrain_bin() {
+  if command -v gbrain >/dev/null 2>&1; then
+    command -v gbrain
+    return 0
+  fi
+  if [ -x "$HOME/.bun/bin/gbrain" ]; then
+    printf '%s\n' "$HOME/.bun/bin/gbrain"
+    return 0
+  fi
+  return 1
+}
+
+detect_bun_bin() {
+  if command -v bun >/dev/null 2>&1; then
+    command -v bun
+    return 0
+  fi
+  for candidate in \
+    "${BUN_INSTALL:-}/bin/bun" \
+    "$HOME/.bun/bin/bun" \
+    "/usr/local/bin/bun" \
+    "/opt/homebrew/bin/bun" \
+    "/usr/bin/bun"
+  do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+activate_gbrain_path() {
+  local gbrain_bin="$1"
+  local bun_bin=""
+  PATH="$(dirname "$gbrain_bin"):$PATH"
+  if bun_bin="$(detect_bun_bin 2>/dev/null)"; then
+    PATH="$(dirname "$bun_bin"):$PATH"
+  fi
+}
+
 STATE_PATH="$TARGET_DIR/.gstack/project-state.json"
 PROJECT_ID="$(node -e '
 const fs = require("fs");
@@ -138,9 +179,13 @@ GBRAIN_CORE_PRESENT="0"
 GBRAIN_CORE_MISSING=""
 GBRAIN_MEMORY_MISSING=""
 GBRAIN_MEMORY_STALE=""
-if command -v gbrain >/dev/null 2>&1 && gbrain --version >/dev/null 2>&1; then
+GBRAIN_BIN=""
+if GBRAIN_BIN="$(detect_gbrain_bin 2>/dev/null)"; then
+  activate_gbrain_path "$GBRAIN_BIN"
+fi
+if [ -n "$GBRAIN_BIN" ] && "$GBRAIN_BIN" --version >/dev/null 2>&1; then
   GBRAIN_STATUS="empty"
-  if GBRAIN_LIST_OUTPUT="$(timeout 6s gbrain list 2>&1)"; then
+  if GBRAIN_LIST_OUTPUT="$(timeout 6s "$GBRAIN_BIN" list 2>&1)"; then
     if [ -n "$GBRAIN_LIST_OUTPUT" ]; then
       GBRAIN_PAGES="$(printf '%s\n' "$GBRAIN_LIST_OUTPUT" | wc -l | tr -d ' ')"
     else
@@ -159,7 +204,7 @@ if command -v gbrain >/dev/null 2>&1 && gbrain --version >/dev/null 2>&1; then
     "project/$PROJECT_ID/code-context" \
     "project/$PROJECT_ID/quality-gates"
   do
-    if ! timeout 8s gbrain get "$core_slug" >/dev/null 2>&1; then
+    if ! timeout 8s "$GBRAIN_BIN" get "$core_slug" >/dev/null 2>&1; then
       GBRAIN_CORE_PRESENT="0"
       GBRAIN_CORE_MISSING="${GBRAIN_CORE_MISSING}${GBRAIN_CORE_MISSING:+,}$core_slug"
     fi
@@ -177,7 +222,7 @@ try {
     "project/$PROJECT_ID/hotspots" \
     "project/$PROJECT_ID/handoff"
   do
-    if MEMORY_PAGE="$(timeout 8s gbrain get "$memory_slug" 2>/dev/null)"; then
+    if MEMORY_PAGE="$(timeout 8s "$GBRAIN_BIN" get "$memory_slug" 2>/dev/null)"; then
       if [ -n "$CODE_CONTEXT_INDEXED_COMMIT" ] && [ -n "$MEMORY_PAGE" ] && [ "$memory_slug" = "project/$PROJECT_ID/gitnexus-index" ] && printf '%s\n' "$MEMORY_PAGE" | grep -Fq "type: gitnexus_index"; then
         if ! printf '%s\n' "$MEMORY_PAGE" | grep -Fq "$CODE_CONTEXT_INDEXED_COMMIT"; then
           GBRAIN_MEMORY_STALE="${GBRAIN_MEMORY_STALE}${GBRAIN_MEMORY_STALE:+,}$memory_slug"
@@ -191,7 +236,7 @@ try {
     GBRAIN_STATUS="ready"
   fi
 
-  if GBRAIN_QUERY_OUTPUT="$(timeout 20s gbrain query "gbrain healthcheck project memory" --no-expand --limit 1 2>&1)"; then
+  if GBRAIN_QUERY_OUTPUT="$(timeout 20s "$GBRAIN_BIN" query "gbrain healthcheck project memory" --no-expand --limit 1 2>&1)"; then
     if [ "$GBRAIN_STATUS" = "ready" ]; then
       GBRAIN_QUERY_STATUS="ready"
       GBRAIN_QUERY_EVIDENCE="health query completed"
@@ -374,6 +419,7 @@ function unique(items) {
 
 function withoutReadinessWarnings(items) {
   const readinessWarnings = new Set([
+    'gbrain_unavailable',
     'gbrain_empty',
     'gbrain_core_pages_missing',
     'gbrain_query_timeout',

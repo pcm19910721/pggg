@@ -15,6 +15,7 @@ Thumbs.db
 .ai-context/runs/
 .gstack/usage-runs/*.json
 .gstack/usage-runs/index.jsonl
+output/imagegen/
 .pytest_cache/
 __pycache__/
 node_modules/

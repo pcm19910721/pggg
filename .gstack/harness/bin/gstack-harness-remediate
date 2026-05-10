@@ -109,6 +109,47 @@ slugify() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g; s/-*$//; s/^$/project/'
 }
 
+detect_gbrain_bin() {
+  if command -v gbrain >/dev/null 2>&1; then
+    command -v gbrain
+    return 0
+  fi
+  if [ -x "$HOME/.bun/bin/gbrain" ]; then
+    printf '%s\n' "$HOME/.bun/bin/gbrain"
+    return 0
+  fi
+  return 1
+}
+
+detect_bun_bin() {
+  if command -v bun >/dev/null 2>&1; then
+    command -v bun
+    return 0
+  fi
+  for candidate in \
+    "${BUN_INSTALL:-}/bin/bun" \
+    "$HOME/.bun/bin/bun" \
+    "/usr/local/bin/bun" \
+    "/opt/homebrew/bin/bun" \
+    "/usr/bin/bun"
+  do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+activate_gbrain_path() {
+  local gbrain_bin="$1"
+  local bun_bin=""
+  PATH="$(dirname "$gbrain_bin"):$PATH"
+  if bun_bin="$(detect_bun_bin 2>/dev/null)"; then
+    PATH="$(dirname "$bun_bin"):$PATH"
+  fi
+}
+
 STATE_PATH="$TARGET_DIR/.gstack/project-state.json"
 PROJECT_ID="$(json_field "$STATE_PATH" "state.project_id" "$(slugify "$(basename "$TARGET_DIR")")")"
 TEMPLATE_SOURCE="$(json_field "$STATE_PATH" "state.template_source" "")"
@@ -291,7 +332,7 @@ const config = {
   gbrain: {
     owns: ['memory', 'decisions', 'state', 'summaries', 'reports', 'handoffs'],
     store_gitnexus_outputs: 'summaries_only',
-    never_import_paths: ['src/', 'app/', 'lib/', 'packages/', 'tests/', '.gitnexus/', '.understand-anything/'],
+    never_import_paths: ['src/', 'app/', 'lib/', 'packages/', 'tests/', '.gitnexus/', '.understand-anything/', 'docs/agents/'],
     pages: {
       overview: `project/${projectId}/overview`,
       state: `project/${projectId}/state`,
@@ -341,7 +382,13 @@ seed_gbrain_page() {
   local title="$2"
   local body="$3"
   local page_type="${4:-project}"
-  if ! command -v gbrain >/dev/null 2>&1 || ! gbrain --version >/dev/null 2>&1; then
+  local gbrain_bin
+  if ! gbrain_bin="$(detect_gbrain_bin 2>/dev/null)"; then
+    record_warning "gbrain_unavailable"
+    return 0
+  fi
+  activate_gbrain_path "$gbrain_bin"
+  if ! "$gbrain_bin" --version >/dev/null 2>&1; then
     record_warning "gbrain_unavailable"
     return 0
   fi
@@ -350,7 +397,7 @@ seed_gbrain_page() {
     record_action "seed_gbrain_page" "$slug" "would seed core gbrain page"
     return 0
   fi
-  if timeout 6s gbrain list 2>/dev/null | grep -Fq "$slug"; then
+  if timeout 6s "$gbrain_bin" list 2>/dev/null | grep -Fq "$slug"; then
     record_action "verify_gbrain_page" "$slug" "core gbrain page already present"
     return 0
   fi
@@ -405,17 +452,17 @@ $body
 EOF
 )"
   fi
-  if timeout 8s env -u OPENAI_API_KEY GBRAIN_NO_AUTO_HOOKS=1 gbrain put "$slug" --content "$content" --no-embed --no-auto-hooks >/dev/null 2>&1; then
+  if timeout 8s env -u OPENAI_API_KEY GBRAIN_NO_AUTO_HOOKS=1 "$gbrain_bin" put "$slug" --content "$content" --no-embed --no-auto-hooks >/dev/null 2>&1; then
     if [ "${slug#project/}" != "$slug" ]; then
-      timeout 4s gbrain tag "$slug" scope:project >/dev/null 2>&1 || true
-      timeout 4s gbrain tag "$slug" "project:$PROJECT_ID" >/dev/null 2>&1 || true
-      timeout 4s gbrain tag "$slug" "project_uid:$project_uid" >/dev/null 2>&1 || true
+      timeout 4s "$gbrain_bin" tag "$slug" scope:project >/dev/null 2>&1 || true
+      timeout 4s "$gbrain_bin" tag "$slug" "project:$PROJECT_ID" >/dev/null 2>&1 || true
+      timeout 4s "$gbrain_bin" tag "$slug" "project_uid:$project_uid" >/dev/null 2>&1 || true
     else
-      timeout 4s gbrain tag "$slug" scope:system >/dev/null 2>&1 || true
+      timeout 4s "$gbrain_bin" tag "$slug" scope:system >/dev/null 2>&1 || true
     fi
-    timeout 4s gbrain tag "$slug" "type:$page_type" >/dev/null 2>&1 || true
-    timeout 4s gbrain tag "$slug" source:harness >/dev/null 2>&1 || true
-    timeout 4s gbrain tag "$slug" status:active >/dev/null 2>&1 || true
+    timeout 4s "$gbrain_bin" tag "$slug" "type:$page_type" >/dev/null 2>&1 || true
+    timeout 4s "$gbrain_bin" tag "$slug" source:harness >/dev/null 2>&1 || true
+    timeout 4s "$gbrain_bin" tag "$slug" status:active >/dev/null 2>&1 || true
     record_action "seed_gbrain_page" "$slug" "seeded core gbrain page"
   else
     gbrain_rc="$?"
@@ -436,10 +483,14 @@ seed_gbrain_page "project/$PROJECT_ID/foundation-readiness" "Foundation Readines
 seed_gbrain_page "project/$PROJECT_ID/code-context" "Code Context: $PROJECT_ID" "GitNexus is the default Code Context provider. UA is optional for dashboard, onboarding, domain graph, and fallback." "code-context"
 seed_gbrain_page "project/$PROJECT_ID/quality-gates" "Quality Gates: $PROJECT_ID" "Quality gates are stored in .gstack/project-state.json and evidenced by reports under docs/." "quality-gates"
 
+GBRAIN_BIN="$(detect_gbrain_bin 2>/dev/null || true)"
+if [ -n "$GBRAIN_BIN" ]; then
+  activate_gbrain_path "$GBRAIN_BIN"
+fi
 if [ "$SKIP_CODE_CONTEXT" -ne 1 ] && [ -f "$TARGET_DIR/scripts/ai-context-bridge.mjs" ] && [ -f "$TARGET_DIR/.ai-context/project.json" ]; then
   if [ "$DRY_RUN" -eq 1 ]; then
     log "DRY_RUN node scripts/ai-context-bridge.mjs sync-gbrain"
-  elif command -v gbrain >/dev/null 2>&1 && gbrain --version >/dev/null 2>&1 && (cd "$TARGET_DIR" && node scripts/ai-context-bridge.mjs sync-gbrain > "$TMP_DIR/sync-gbrain.out" 2> "$TMP_DIR/sync-gbrain.err"); then
+  elif [ -n "$GBRAIN_BIN" ] && "$GBRAIN_BIN" --version >/dev/null 2>&1 && (cd "$TARGET_DIR" && node scripts/ai-context-bridge.mjs sync-gbrain > "$TMP_DIR/sync-gbrain.out" 2> "$TMP_DIR/sync-gbrain.err"); then
     SYNC_STATUS="$(json_field "$TMP_DIR/sync-gbrain.out" "state.status" "unknown")"
     record_action "sync_gbrain_project_memory" "project/$PROJECT_ID" "ran GitNexus bridge sync-gbrain ($SYNC_STATUS)"
     if [ "$SYNC_STATUS" != "synced" ]; then

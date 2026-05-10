@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -72,6 +73,34 @@ function run(command, args, opts = {}) {
     stderr: result.stderr || '',
     error: result.error,
   };
+}
+
+function candidateHomeBin(command) {
+  if (!process.env.HOME) return null;
+  return path.join(process.env.HOME, '.bun', 'bin', command);
+}
+
+function resolveCommand(command) {
+  if (command !== 'gbrain' || process.platform === 'win32') return command;
+  if (commandExists(command)) return command;
+  const candidate = candidateHomeBin(command);
+  if (candidate && isExecutableFile(candidate)) return candidate;
+  return command;
+}
+
+function withCommandDirOnPath(env, command) {
+  if (!path.isAbsolute(command)) return env;
+  const next = { ...env };
+  const dirs = [
+    path.dirname(command),
+    process.env.BUN_INSTALL ? path.join(process.env.BUN_INSTALL, 'bin') : '',
+    path.join(process.env.HOME || '', '.bun', 'bin'),
+    '/usr/local/bin',
+    '/opt/homebrew/bin',
+    '/usr/bin',
+  ].filter(Boolean);
+  next.PATH = [...dirs, next.PATH || ''].filter(Boolean).join(':');
+  return next;
 }
 
 function git(args, cwd = ROOT) {
@@ -213,6 +242,9 @@ Before code work:
 Use GitNexus for current code facts: source symbols, calls, imports, execution flows, context, impact, and detect-changes.
 Use gbrain for durable memory: decisions, state, assumptions, quality gates, hotspots, and handoff notes.
 Use Understand Anything only as an optional visual/onboarding/domain-graph provider or fallback.
+
+Lightweight handoff:
+If the user only says "接管", "继续", "恢复现场", or "继续项目", read minimal state (\`PROJECT_STATE.md\`, \`.gstack/project-state.json\`, and project handoff/state pages if available), check whether GitNexus or gbrain memory is stale, then output only current phase/readiness/blockers/warnings/recommended next recipe and agent/refresh needs. Do not modify files or start business work unless explicitly asked. Handoff restores navigation state, not the full project context; expand details only for the next concrete task.
 
 Never import the full source tree, \`.gitnexus/\`, or \`.understand-anything/\` into gbrain. Store concise summaries and pointers only.
 
@@ -424,15 +456,24 @@ function gbrainEnv() {
 }
 
 function writeGbrain(slug, markdown, opts = {}) {
-  return run('gbrain', ['put', slug, '--content', markdown, '--no-embed', '--no-auto-hooks'], {
-    env: opts.noEmbed === false ? process.env : gbrainEnv(),
+  const command = resolveCommand('gbrain');
+  const env = opts.noEmbed === false ? process.env : gbrainEnv();
+  return run(command, ['put', slug, '--content', markdown, '--no-embed', '--no-auto-hooks'], {
+    env: withCommandDirOnPath(env, command),
     timeoutMs: opts.timeoutMs || 30000,
   });
 }
 
+function runGbrain(args, opts = {}) {
+  const command = resolveCommand('gbrain');
+  return run(command, args, {
+    ...opts,
+    env: withCommandDirOnPath(opts.env || process.env, command),
+  });
+}
+
 function getGbrain(slug, opts = {}) {
-  return run('gbrain', ['get', slug], {
-    env: process.env,
+  return runGbrain(['get', slug], {
     timeoutMs: opts.timeoutMs || 8000,
   });
 }
@@ -446,6 +487,15 @@ function commandExists(command) {
       stdio: 'ignore',
     });
   return result.status === 0;
+}
+
+function isExecutableFile(file) {
+  try {
+    fsSync.accessSync(file, fsSync.constants.X_OK);
+    return fsSync.statSync(file).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function sameCommand(a, b) {
@@ -470,7 +520,8 @@ function codeContextStatus(summary) {
 }
 
 function yamlValue(value) {
-  return String(value ?? '').replace(/\n/g, ' ');
+  const text = String(value ?? '').replace(/\n/g, ' ');
+  return text === '' ? '""' : text;
 }
 
 function markdownCodeContextReport(config, summary, status, operation, details = {}) {
@@ -499,13 +550,16 @@ code_context:
   stale: ${summary.stale ? 'true' : 'false'}
   indexed_at: ${yamlValue(summary.indexed_at || '')}
   indexed_commit: ${yamlValue(summary.last_commit || '')}
-  files: ${stats.files ?? ''}
-  nodes: ${stats.nodes ?? ''}
-  edges: ${stats.edges ?? ''}
+  files: ${yamlValue(stats.files ?? '')}
+  nodes: ${yamlValue(stats.nodes ?? '')}
+  edges: ${yamlValue(stats.edges ?? '')}
   run_id: ${yamlValue(details.run_id || '')}
   risk: ${yamlValue(details.risk || '')}
-  detect_changes_ok: ${details.detect_changes_ok === undefined ? '' : String(details.detect_changes_ok)}
+  detect_risk: ${yamlValue(details.detect_risk || '')}
+  impact_risks: ${JSON.stringify(details.impact_risks || [])}
+  detect_changes_ok: ${yamlValue(details.detect_changes_ok === undefined ? '' : String(details.detect_changes_ok))}
   impact_targets: ${JSON.stringify(details.impact_targets || [])}
+  test_evidence: ${JSON.stringify(details.tests || [])}
   artifacts:
     config: .ai-context/project.json
     gitnexus_status: .ai-context/gitnexus-status.json
@@ -677,7 +731,7 @@ function markdownOverviewPage(input) {
 - gbrain: ${state.foundation?.gbrain || 'unknown'}
 - gbrain query: ${state.foundation?.gbrain_query || 'unknown'}
 - Code Context: ${state.quality_gates?.code_context || codeContextStatus(summary)}
-- Next agent: ${state.next_recommended_agent || 'Orchestrator'}
+- Next recommended agent: ${state.next_recommended_agent || 'Orchestrator'}
 - Next recipe: ${state.next_recommended_recipe || 'R0 Restore / Resume Context'}
 
 ## Runtime Commands
@@ -1113,9 +1167,7 @@ function projectSlugCandidates(config, args = {}) {
   }
 
   const prefix = `project/${config.project_id}/`;
-  const listed = commandExists('gbrain')
-    ? run('gbrain', ['list'], { timeoutMs: 10000 })
-    : { ok: false, stdout: '', stderr: 'gbrain command not found' };
+  const listed = runGbrain(['list'], { timeoutMs: 10000 });
   const found = [];
   if (listed.ok) {
     const pattern = new RegExp(`\\b${escapeRegExp(prefix)}[^\\s|,)]+`, 'g');
@@ -1268,9 +1320,7 @@ async function commandSyncGbrain(args = {}) {
     await fs.writeFile(path.join(ROOT, '.ai-context', 'gitnexus-index.md'), markdown, 'utf-8');
     await updateCodeContextArtifacts(config, summary, 'sync-gbrain');
 
-    const gbrainVersion = commandExists('gbrain')
-      ? run('gbrain', ['--version'], { timeoutMs: 8000 })
-      : { ok: false, status: 127, stdout: '', stderr: 'gbrain command not found' };
+    const gbrainVersion = runGbrain(['--version'], { timeoutMs: 8000 });
     if (!gbrainVersion.ok) {
       warnings.push('gbrain_unavailable');
       fallbacks.push(await writeGbrainFallback(
@@ -1364,6 +1414,50 @@ function extractRisk(text) {
   return match ? match[1].toLowerCase() : 'unknown';
 }
 
+function arrayArg(value) {
+  if (value === undefined || value === null || value === false) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function normalizeExitCode(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : String(value);
+}
+
+function collectTestEvidence(args) {
+  const commands = arrayArg(args.testCommand);
+  const exitCodes = arrayArg(args.testExitCode);
+  const artifacts = arrayArg(args.testArtifact);
+  const count = Math.max(commands.length, exitCodes.length, artifacts.length);
+  const tests = [];
+  for (let index = 0; index < count; index += 1) {
+    const command = commands[index] || commands[0] || '';
+    const artifact = artifacts[index] || artifacts[0] || '';
+    const exitCode = normalizeExitCode(exitCodes[index] ?? exitCodes[0]);
+    if (!command && !artifact && exitCode === null) continue;
+    tests.push({
+      command,
+      exit_code: exitCode,
+      artifact,
+    });
+  }
+  return tests;
+}
+
+function markdownTestEvidence(tests) {
+  if (!tests.length) {
+    return '- Not recorded by bridge. Add commands and results here before final handoff.';
+  }
+  return tests.map((test, index) => [
+    `### Test ${index + 1}`,
+    '',
+    `- Command: ${test.command || 'not recorded'}`,
+    `- Exit code: ${test.exit_code === null ? 'not recorded' : test.exit_code}`,
+    `- Artifact: ${test.artifact || 'not recorded'}`,
+  ].join('\n')).join('\n\n');
+}
+
 async function commandPostchange(args) {
   const config = await loadConfig();
   if (!isGitRepo(config.repo_path)) {
@@ -1385,6 +1479,7 @@ async function commandPostchange(args) {
   const detect = await runGitNexus(config, detectArgs);
   const detectText = (detect.stdout || '') + (detect.stderr ? `\nSTDERR:\n${detect.stderr}` : '');
   await fs.writeFile(path.join(dir, 'detect-changes.txt'), detectText || '(no output)\n', 'utf-8');
+  const tests = collectTestEvidence(args);
 
   const impactTargets = args.impact ? (Array.isArray(args.impact) ? args.impact : [args.impact]) : [];
   const impacts = [];
@@ -1403,7 +1498,9 @@ async function commandPostchange(args) {
     impacts.push({ target, file, ok: impact.ok, risk: extractRisk(text) });
   }
 
-  const risk = impacts.find((impact) => ['critical', 'high'].includes(impact.risk))?.risk || extractRisk(detectText);
+  const detectRisk = extractRisk(detectText);
+  const impactRisks = impacts.map((impact) => ({ target: impact.target, risk: impact.risk }));
+  const risk = impacts.find((impact) => ['critical', 'high'].includes(impact.risk))?.risk || detectRisk;
   const note = `---
 type: impact_analysis
 project: ${config.project_id}
@@ -1446,7 +1543,7 @@ ${impacts.map((impact) => `## GitNexus impact: ${impact.target}
 `).join('')}
 ## Tests
 
-- Not recorded by bridge. Add commands and results here before final handoff.
+${markdownTestEvidence(tests)}
 
 ## Risks
 
@@ -1468,7 +1565,10 @@ ${impacts.map((impact) => `## GitNexus impact: ${impact.target}
     commit_after: 'working-tree',
     working_tree_status: status ? 'dirty' : 'clean',
     detect_changes_ok: detect.ok,
+    detect_risk: detectRisk,
+    impact_risks: impactRisks,
     impact_targets: impacts,
+    tests,
     gbrain_slug: `artifact/${config.project_id}/impact-analysis/${id}`,
     generated_at: new Date().toISOString(),
   });
@@ -1479,7 +1579,10 @@ ${impacts.map((impact) => `## GitNexus impact: ${impact.target}
   await updateCodeContextArtifacts(config, summary, 'postchange', {
     run_id: id,
     detect_changes_ok: detect.ok,
+    detect_risk: detectRisk,
+    impact_risks: impactRisks,
     impact_targets: impacts.map((impact) => impact.target),
+    tests,
     risk,
     status: detect.ok ? (summary.stale ? 'stale' : 'ready') : 'stale',
   });
@@ -1505,7 +1608,7 @@ function usage() {
   node scripts/ai-context-bridge.mjs refresh [--skip-analyze] [--no-embeddings] [--write-gbrain]
   node scripts/ai-context-bridge.mjs sync-gbrain [--dry-run] [--page overview|state|foundation_readiness|code_context|quality_gates|gitnexus_index|architecture|hotspots|handoff|decisions|assumptions|all]
   node scripts/ai-context-bridge.mjs repair-gbrain [--dry-run] [--page key|slug|all]
-  node scripts/ai-context-bridge.mjs postchange [--scope all|staged|unstaged|compare] [--base-ref main] [--impact Symbol] [--write-gbrain]
+  node scripts/ai-context-bridge.mjs postchange [--scope all|staged|unstaged|compare] [--base-ref main] [--impact Symbol] [--test-command CMD] [--test-exit-code CODE] [--test-artifact PATH] [--write-gbrain]
 `);
 }
 

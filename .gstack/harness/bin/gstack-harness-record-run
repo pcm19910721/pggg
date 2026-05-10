@@ -12,7 +12,9 @@ Options:
   --target DIR             Target project directory. Default: current directory.
   --event NAME             Event name. Default: manual_snapshot.
   --status STATUS          Run status/verdict.
-  --agent NAME             Agent used or recommended.
+  --agent NAME             Agent used or recommended. Repeatable.
+  --skill NAME             Skill used during the run. Repeatable.
+  --tool NAME              Tool or command used during the run. Repeatable.
   --recipe NAME            Workflow recipe used or recommended.
   --intent TEXT            User intent or run purpose.
   --where-stalled TEXT     Where the run stalled.
@@ -34,7 +36,6 @@ EOF
 TARGET="."
 EVENT="manual_snapshot"
 STATUS=""
-AGENT=""
 RECIPE=""
 INTENT=""
 WHERE_STALLED=""
@@ -42,6 +43,9 @@ USER_CORRECTION=""
 NOTES=""
 TEMPLATE_SOURCE=""
 NO_REGISTRY=0
+AGENTS=()
+SKILLS=()
+TOOLS=()
 CAPABILITY_GAPS=()
 ARTIFACTS=()
 WARNINGS=()
@@ -62,7 +66,15 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --agent)
-      AGENT="${2:-}"
+      AGENTS+=("${2:-}")
+      shift 2
+      ;;
+    --skill)
+      SKILLS+=("${2:-}")
+      shift 2
+      ;;
+    --tool)
+      TOOLS+=("${2:-}")
       shift 2
       ;;
     --recipe)
@@ -155,9 +167,18 @@ if git -C "$TARGET_DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
   fi
 fi
 
-export TARGET_DIR RUNS_DIR GENERATED_AT RUN_ID EVENT STATUS AGENT RECIPE INTENT
+PRIMARY_AGENT=""
+if [ "${#AGENTS[@]}" -gt 0 ]; then
+  PRIMARY_AGENT="${AGENTS[0]}"
+fi
+
+export TARGET_DIR RUNS_DIR GENERATED_AT RUN_ID EVENT STATUS RECIPE INTENT
 export WHERE_STALLED USER_CORRECTION NOTES TEMPLATE_SOURCE REGISTRY_PATH NO_REGISTRY
 export GIT_BRANCH GIT_DIRTY
+export AGENT="$PRIMARY_AGENT"
+export GSTACK_RECORD_AGENTS="$(join_lines "${AGENTS[@]}")"
+export GSTACK_RECORD_SKILLS="$(join_lines "${SKILLS[@]}")"
+export GSTACK_RECORD_TOOLS="$(join_lines "${TOOLS[@]}")"
 export GSTACK_RECORD_CAPABILITY_GAPS="$(join_lines "${CAPABILITY_GAPS[@]}")"
 export GSTACK_RECORD_ARTIFACTS="$(join_lines "${ARTIFACTS[@]}")"
 export GSTACK_RECORD_WARNINGS="$(join_lines "${WARNINGS[@]}")"
@@ -210,7 +231,14 @@ const projectId = state.project_id || path.basename(target).toLowerCase().replac
 const event = env.EVENT || 'manual_snapshot';
 const status = env.STATUS || state.foundation?.readiness || 'unknown';
 const recipe = env.RECIPE || state.next_recommended_recipe || '';
-const agent = env.AGENT || state.next_recommended_agent || '';
+const agents = unique([
+  ...lines('GSTACK_RECORD_AGENTS'),
+  env.AGENT || '',
+  state.next_recommended_agent || '',
+]);
+const skills = unique(lines('GSTACK_RECORD_SKILLS'));
+const tools = unique(lines('GSTACK_RECORD_TOOLS'));
+const agent = agents[0] || '';
 const extraWarnings = lines('GSTACK_RECORD_WARNINGS');
 const extraBlockers = lines('GSTACK_RECORD_BLOCKERS');
 const warnings = unique([...(Array.isArray(state.warnings) ? state.warnings : []), ...extraWarnings]);
@@ -249,8 +277,9 @@ const run = {
   foundation: state.foundation || {},
   quality_gates: state.quality_gates || {},
   chosen_recipe: recipe,
-  agents_used: agent ? [agent] : [],
-  skills_used: [],
+  agents_used: agents,
+  skills_used: skills,
+  tools_used: tools,
   warnings,
   blockers,
   problem_handling_required: problemHandlingRequired,
@@ -281,7 +310,10 @@ const summary = {
   target: run.target,
   status: run.status,
   recipe: run.chosen_recipe,
-  agent: agent,
+  agent,
+  agents,
+  skills,
+  tools,
   warnings,
   blockers,
   file: rel(runFile),
@@ -315,6 +347,9 @@ nextState.usage = {
   latest_run: rel(runFile),
   latest_event: event,
   latest_recorded_at: run.generated_at,
+  latest_agents: agents,
+  latest_skills: skills,
+  latest_tools: tools,
 };
 
 if (env.NO_REGISTRY !== '1') {
