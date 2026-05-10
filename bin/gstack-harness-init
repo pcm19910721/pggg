@@ -803,6 +803,9 @@ copy_file "MEMORY_ARCHITECTURE.md" "MEMORY_ARCHITECTURE.md"
 copy_file "GBRAIN_SCHEMA.md" "GBRAIN_SCHEMA.md"
 copy_file "AGENT_ORCHESTRATOR.md" "docs/AGENT_ORCHESTRATOR.md"
 copy_file "AGENT_WORKFLOWS.md" "docs/AGENT_WORKFLOWS.md"
+copy_file "bin/pggg" ".gstack/harness/bin/pggg"
+copy_file "bin/pggg.ps1" ".gstack/harness/bin/pggg.ps1"
+copy_file "bin/pggg.cmd" ".gstack/harness/bin/pggg.cmd"
 copy_file "bin/pcm-harness" ".gstack/harness/bin/pcm-harness"
 copy_file "bin/pcm-harness.ps1" ".gstack/harness/bin/pcm-harness.ps1"
 copy_file "bin/pcm-harness.cmd" ".gstack/harness/bin/pcm-harness.cmd"
@@ -818,7 +821,7 @@ copy_file "scripts/gstack-scheduler.mjs" "scripts/gstack-scheduler.mjs"
 copy_file "docs/SCHEDULER_MODEL.md" "docs/SCHEDULER_MODEL.md"
 
 if [ "$DRY_RUN" -ne 1 ]; then
-  chmod +x "$TARGET_DIR/.gstack/harness/bin/pcm-harness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-record-run" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-usage-report" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-enable-report-timer" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-schedule" "$TARGET_DIR/scripts/ai-context-bridge.mjs" "$TARGET_DIR/scripts/gstack-scheduler.mjs" 2>/dev/null || true
+  chmod +x "$TARGET_DIR/.gstack/harness/bin/pggg" "$TARGET_DIR/.gstack/harness/bin/pcm-harness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-record-run" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-usage-report" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-enable-report-timer" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-schedule" "$TARGET_DIR/scripts/ai-context-bridge.mjs" "$TARGET_DIR/scripts/gstack-scheduler.mjs" 2>/dev/null || true
 fi
 
 AGENT_TEAM_CONTENT="$(cat <<EOF
@@ -827,7 +830,7 @@ AGENT_TEAM_CONTENT="$(cat <<EOF
 Generated: $DATE
 Project: $PROJECT_ID
 
-This project uses a standard GStack Harness agent team. The team is installed automatically by \`pcm-harness\`; the user should not need to choose agents during onboarding.
+This project uses a standard PGGG Harness agent team. The team is installed automatically by \`pggg\`; the user should not need to choose agents during onboarding.
 
 ## Required Core Agents
 
@@ -1274,7 +1277,7 @@ $WARNING_TEXT
 
 ## Recent Agent Runs
 
-- $DATE: pcm-harness installed harness protocol. Verdict: $FOUNDATION_VERDICT.
+- $DATE: pggg installed harness protocol. Verdict: $FOUNDATION_VERDICT.
 
 ## Notes
 
@@ -1906,7 +1909,7 @@ active
 
 ## Harness
 
-Installed by local pcm-harness on $DATE.
+Installed by local pggg on $DATE.
 
 ## Mode
 

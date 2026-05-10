@@ -27,7 +27,7 @@ GStack Harness 是一个项目级操作层安装器。
 
 ```bash
 cd /path/to/target-project
-pcm-harness
+pggg
 ```
 
 然后 harness 在目标项目里自动安装基础盘子：
@@ -77,7 +77,7 @@ next recommended recipe
 | `template_source` | 维护基础盘子、协议、模板和安装逻辑 | recommended |
 | `target_project` | 真实业务项目，安装 harness 后运行 workflow | required for review/release gates |
 
-当前 `gstack-multiagent` 目录是 `template_source`。
+当前 PGGG 仓库目录是 `template_source`。
 
 所以：
 
@@ -92,30 +92,32 @@ not_git_repo 对 target_project 的 review/release flow 是 blocker。
 
 ```bash
 cd /path/to/target-project
-pcm-harness
+pggg
 ```
+
+`pggg` 是主入口；`pcm-harness` 仅作为旧安装和旧文档的兼容别名保留。
 
 它不是一个让用户选择参数的工具。它应该自动完成检测、升级、自检、状态渲染和 Codex 接管。
 
-当前本机建议把这个命令放进 PATH：
+本机可以把这个命令放进 PATH：
 
 ```bash
 mkdir -p ~/.local/bin
-ln -sf /home/adminpcm/gstack-multiagent/bin/pcm-harness ~/.local/bin/pcm-harness
+ln -sf /path/to/pggg/bin/pggg ~/.local/bin/pggg
 ```
 
-Windows PowerShell 也可以使用同一个命令，但实际执行仍走 WSL。安装的 Windows shim 位于：
+Windows PowerShell 也可以使用同一个命令，但实际执行仍走 WSL。安装的 Windows shim 通常位于用户 npm bin 目录：
 
 ```text
-C:\Users\Admin\AppData\Roaming\npm\pcm-harness.cmd
-C:\Users\Admin\AppData\Roaming\npm\pcm-harness.ps1
+C:\Users\<User>\AppData\Roaming\npm\pggg.cmd
+C:\Users\<User>\AppData\Roaming\npm\pggg.ps1
 ```
 
 PowerShell 用法：
 
 ```powershell
 cd E:\2026workspace\gpt2img
-pcm-harness
+pggg
 ```
 
 它会自动把 Windows 当前目录转换为 WSL 路径，例如：
@@ -127,7 +129,7 @@ E:\2026workspace\gpt2img -> /mnt/e/2026workspace/gpt2img
 阶段 1 不修改 gstack 本体，不要求把命令接入 gstack 分发。长期产品命令可以是：
 
 ```bash
-pcm-harness
+pggg
 ```
 
 标准流程：
@@ -163,7 +165,7 @@ pcm-harness
 这是模板源维护动作，不是目标项目用户路径。
 
 ```bash
-cd /home/adminpcm/gstack-multiagent
+cd /path/to/pggg
 bin/gstack-harness-self-test
 ```
 
@@ -183,12 +185,12 @@ re-init 保留运行报告和运行态
 
 ## Template Source Health Gate
 
-目标项目接入后，也要把 `template_source` 本身作为固定检查项。原因是目标项目运行的 installer、readiness、remediation 和 agent/team 模板都来自模板源；如果模板源没有 Git baseline、自测失败或 GitNexus stale，目标项目重跑 `pcm-harness` 只会继续复制有问题的流程。
+目标项目接入后，也要把 `template_source` 本身作为固定检查项。原因是目标项目运行的 installer、readiness、remediation 和 agent/team 模板都来自模板源；如果模板源没有 Git baseline、自测失败或 GitNexus stale，目标项目重跑 `pggg` 只会继续复制有问题的流程。
 
 模板源健康检查：
 
 ```bash
-cd /home/adminpcm/gstack-multiagent
+cd /path/to/pggg
 git status --short
 bin/gstack-harness-self-test
 npx gitnexus status
@@ -198,7 +200,7 @@ npx gitnexus status
 
 ```bash
 cd /path/to/target-project
-pcm-harness --no-start-codex
+pggg --no-start-codex
 .gstack/harness/bin/gstack-harness-readiness --target .
 ```
 
@@ -206,7 +208,7 @@ pcm-harness --no-start-codex
 
 ```text
 1. 先修模板源：self-test 通过，GitNexus up-to-date，harness 逻辑已提交。
-2. 再回目标项目重跑 pcm-harness，让目标项目拿到最新 installer/readiness/remediation。
+2. 再回目标项目重跑 pggg，让目标项目拿到最新 installer/readiness/remediation。
 3. 目标项目自己的 runtime 依赖、业务测试失败、真实凭证和部署问题，仍在目标项目处理。
 ```
 
@@ -219,7 +221,7 @@ pcm-harness --no-start-codex
 .gstack/usage-runs/index.jsonl
 ```
 
-`pcm-harness` 每次运行都会自动记录一次 `harness_init` event，并把目标项目追加到本机 registry。标准入口启动 Codex 时，还会围绕 Codex 子进程自动记录 `codex_session_start` 和 `codex_session_end`：
+`pggg` 每次运行都会自动记录一次 `harness_init` event，并把目标项目追加到本机 registry。标准入口启动 Codex 时，还会围绕 Codex 子进程自动记录 `codex_session_start` 和 `codex_session_end`：
 
 ```text
 ~/.gstack-harness/projects.jsonl
@@ -239,14 +241,14 @@ Agent 在真实 session 结束时应调用目标项目里的 recorder：
 模板源维护者聚合真实使用反馈：
 
 ```bash
-cd /home/adminpcm/gstack-multiagent
+cd /path/to/pggg
 bin/gstack-harness-usage-report
 ```
 
 启用重启后自动聚合：
 
 ```bash
-cd /home/adminpcm/gstack-multiagent
+cd /path/to/pggg
 bin/gstack-harness-enable-report-timer
 ```
 
@@ -293,7 +295,7 @@ capability gaps
 
 ## Existing File Strategy
 
-`pcm-harness` 默认会统一已有 harness 文档，而不是散落 `.new` 文件。
+`pggg` 默认会统一已有 harness 文档，而不是散落 `.new` 文件。
 
 规则：
 
@@ -584,7 +586,7 @@ agent/<agent-id>/handoff
 
 ## Installation Output
 
-`pcm-harness` 完成后应该输出：
+`pggg` 完成后应该输出：
 
 ```yaml
 status: ready | partial | blocked
@@ -636,7 +638,7 @@ next_recommended_recipe:
 ## V0 Success Criteria
 
 ```text
-在任意目标项目里运行 `pcm-harness`，就能安装 harness 基础盘子。
+在任意目标项目里运行 `pggg`，就能安装 harness 基础盘子。
 安装后 Orchestrator 能知道项目在哪、下一步该做什么、缺什么证据。
 gbrain 有 project/<id>/overview、state、foundation-readiness、code-context、quality-gates、gitnexus-index、architecture、hotspots、handoff 等项目记忆，且带 project_uid，多个项目不会混写。
 gstack skills 仍是唯一能力源。

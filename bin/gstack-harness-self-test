@@ -231,6 +231,9 @@ test_fresh_install() {
     ".gstack/project-state.json"
     ".gstack/harness/agents/TEAM.md"
     ".gstack/harness/agents/problem-handling.md"
+    ".gstack/harness/bin/pggg"
+    ".gstack/harness/bin/pggg.ps1"
+    ".gstack/harness/bin/pggg.cmd"
     ".gstack/harness/bin/pcm-harness"
     ".gstack/harness/bin/pcm-harness.ps1"
     ".gstack/harness/bin/pcm-harness.cmd"
@@ -306,6 +309,8 @@ test_fresh_install() {
   assert_contains "$INSTALL_DIR/init.out" '"provider": "gitnexus"'
   assert_contains "$INSTALL_DIR/init.out" '"config": ".ai-context/project.json"'
   assert_contains "$INSTALL_DIR/.gstack/usage-runs/index.jsonl" "harness_init"
+  (cd "$INSTALL_DIR" && PATH="$FAKE_BIN:$PATH" .gstack/harness/bin/pggg --dry-run --no-start-codex > "$TMP_ROOT/pggg-local.out")
+  assert_contains "$TMP_ROOT/pggg-local.out" "DRY_RUN"
   (cd "$INSTALL_DIR" && PATH="$FAKE_BIN:$PATH" .gstack/harness/bin/pcm-harness --dry-run --no-start-codex > "$TMP_ROOT/pcm-local.out")
   assert_contains "$TMP_ROOT/pcm-local.out" "DRY_RUN"
 
@@ -416,7 +421,7 @@ EOF
   assert_contains "$seed_content_dir/project__seeded__state.md" "project_uid:"
   assert_contains "$seed_content_dir/project__seeded__state.md" "repo_path: \"$seed_dir\""
 
-  pass "fresh install writes protocol, agent team, pcm-harness, reports, managed block, usage run, and valid JSON"
+  pass "fresh install writes protocol, agent team, pggg entrypoint, reports, managed block, usage run, and valid JSON"
 }
 
 test_readiness_invariants() {
@@ -813,6 +818,7 @@ main() {
   require_node
   setup_fake_tools
   bash -n "$INIT"
+  bash -n "$SCRIPT_DIR/pggg"
   bash -n "$SCRIPT_DIR/pcm-harness"
   bash -n "$SCRIPT_DIR/gstack-harness-record-run"
   bash -n "$SCRIPT_DIR/gstack-harness-usage-report"

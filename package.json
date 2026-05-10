@@ -1,0 +1,16 @@
+{
+  "name": "pggg",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "PGGG Harness: PCM's project agent harness for gstack, gbrain, GitNexus, durable memory, evidence gates, and handoffs.",
+  "scripts": {
+    "test": "node --test tests/*.mjs",
+    "check:shell": "bash -n bin/pggg bin/pcm-harness bin/gstack-harness-*",
+    "self-test": "bin/gstack-harness-self-test",
+    "verify": "npm run test && npm run check:shell && npm run self-test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

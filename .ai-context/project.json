@@ -1,7 +1,7 @@
 {
   "schema_version": "0.1.0",
   "project_id": "gstack-multiagent",
-  "repo_path": "/home/adminpcm/gstack-multiagent",
+  "repo_path": ".",
   "base_branch": "main",
   "code_context_provider": "gitnexus",
   "gitnexus": {

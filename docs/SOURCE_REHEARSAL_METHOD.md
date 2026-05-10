@@ -2,14 +2,14 @@
 
 This document is for the `gstack-multiagent` source project only.
 
-It must not be copied into target projects by `pcm-harness`, and target projects must not be told to rehearse against `huanzhuang`.
+It must not be copied into target projects by `pggg`, and target projects must not be told to rehearse against `huanzhuang`.
 
 ## Boundary
 
 ```text
 gstack-multiagent = harness source and rule consolidation project
 huanzhuang = local live rehearsal target for this source project
-pcm-harness target projects = normal users of the harness, not rehearsal infrastructure
+pggg target projects = normal users of the harness, not rehearsal infrastructure
 ```
 
 The rehearsal method exists to improve this source project. It is not part of the installed target-project workflow.
@@ -19,14 +19,14 @@ The rehearsal method exists to improve this source project. It is not part of th
 Use this loop for future harness behavior changes:
 
 ```text
-1. Solidify candidate changes in /home/adminpcm/gstack-multiagent.
-2. Refresh the installed harness in /home/adminpcm/projects/huanzhuang from that source.
+1. Solidify candidate changes in /path/to/gstack-multiagent.
+2. Refresh the installed harness in /path/to/rehearsal-target from that source.
 3. Rehearse in huanzhuang with the installed .gstack/harness/bin/* and scripts/ai-context-bridge.mjs, not a source-tree temp copy.
 4. Record the run in huanzhuang .gstack/usage-runs/.
 5. Preserve evidence: tests, GitNexus output, readiness output, fallback artifacts, and handoff notes.
 6. Score the run using the rehearsal scorecard.
 7. Extract the lesson from evidence, not from intention.
-8. Return to /home/adminpcm/gstack-multiagent and solidify only the verified contract, manifest, runbook, or harness rule.
+8. Return to /path/to/gstack-multiagent and solidify only the verified contract, manifest, runbook, or harness rule.
 ```
 
 Rules without rehearsal evidence are proposals. Rules with rehearsal evidence can become contract.
@@ -213,7 +213,7 @@ gbrain wrapper failed under PATH=/usr/bin:/bin when it used `exec bun ...`
 healthcheck had previously killed duplicate `gbrain serve` processes, which can close Codex MCP stdio transports
 updated local gbrain wrapper to resolve bun from $HOME/.bun/bin, PATH, or /usr/local/bin
 updated ~/.gbrain/healthcheck.sh to observe `gbrain serve` processes instead of killing them
-MCP protocol initialize + get_stats passed under HOME=/home/adminpcm PATH=/usr/bin:/bin
+MCP protocol initialize + get_stats passed under HOME=/tmp/example-home PATH=/usr/bin:/bin
 huanzhuang sync-gbrain wrote 9/9 project memory pages with no warnings
 handoff/state/foundation-readiness/quality-gates now route to Orchestrator + R0 Restore / Resume Context
 search no longer returns stale huanzhuang Foundation Remediation handoff text
@@ -238,7 +238,7 @@ project/scenario20260510154147/{state,handoff}
 Task:
 
 ```text
-Verify that a new pcm-harness target writes project-scoped gbrain memory before the first readiness verdict, so a later Codex session can resume from gbrain state/handoff without manual sync.
+Verify that a new pggg target writes project-scoped gbrain memory before the first readiness verdict, so a later Codex session can resume from gbrain state/handoff without manual sync.
 ```
 
 Outcome:

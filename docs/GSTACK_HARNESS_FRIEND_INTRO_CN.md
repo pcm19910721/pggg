@@ -1,4 +1,4 @@
-# 给朋友看的 GStack Harness 图文介绍
+# 给朋友看的 PGGG Harness 图文介绍
 
 > 配图说明：本文预留了 3 张 gpt-image-2 配图位。当前环境调用 gpt-image-2 时返回“额度不足”，所以图片文件尚未生成；配图提示词和重跑方式见文末。额度恢复后，生成图片会落到 `output/imagegen/`，本文图片链接会自动生效。
 
@@ -6,7 +6,7 @@
 
 ## 一句话
 
-GStack Harness 是给代码项目装上的一层“AI 项目操作系统”：它把项目状态、长期记忆、代码上下文、多 Agent 分工、测试评审和发布门禁串起来，让 AI 不只是临时聊天，而是能按项目流程持续接管工作。
+PGGG Harness 是给代码项目装上的一层“AI 项目操作系统”：它把项目状态、长期记忆、代码上下文、多 Agent 分工、测试评审和发布门禁串起来，让 AI 不只是临时聊天，而是能按项目流程持续接管工作。
 
 ## 它解决什么问题
 
@@ -18,16 +18,16 @@ GStack Harness 是给代码项目装上的一层“AI 项目操作系统”：�
 - AI 经常跳过真实验证，直接给一个“看起来完成了”的答案。
 - 项目越复杂，越需要一个能恢复上下文、能分工、能留证据的工作层。
 
-GStack Harness 做的就是把这些散乱环节装成一套可复用的项目级流程。
+PGGG Harness 做的就是把这些散乱环节装成一套可复用的项目级流程。
 
 ## 这个仓库是什么
 
-`gstack-multiagent` 不是一个业务应用，也不是新的 gstack skill 实现层。它是 **Harness Template Source**：维护基础盘子、协议、模板和安装逻辑。
+`pggg` 不是一个业务应用，也不是新的 gstack skill 实现层。它是 **Harness Template Source**：维护基础盘子、协议、模板和安装逻辑。
 
 真实使用时，在任意目标项目目录运行：
 
 ```bash
-pcm-harness
+pggg
 ```
 
 它会把项目需要的协议文件、状态文件、Agent 团队说明、GitNexus 代码上下文桥、gbrain 项目记忆页和 readiness 检查装进目标项目，然后把项目交给 Orchestrator 接管。
@@ -37,7 +37,7 @@ pcm-harness
 你可以把它理解成：
 
 1. 你打开一个项目。
-2. 运行 `pcm-harness`。
+2. 运行 `pggg`。
 3. Harness 自动检查 gbrain、gstack、GitNexus、项目协议和运行命令是否就位。
 4. 如果缺东西，Foundation Remediation Agent 只补 harness 基础，不乱改业务代码。
 5. 项目总控 Agent 读取 `PROJECT_STATE.md`、`.gstack/project-state.json`、gbrain 记忆和 workflow recipes。
@@ -52,7 +52,8 @@ pcm-harness
 
 | 部件 | 作用 |
 |---|---|
-| `pcm-harness` | 用户入口，一条命令安装、升级、自检并交给 Orchestrator |
+| `pggg` | 用户入口，一条命令安装、升级、自检并交给 Orchestrator |
+| `pcm-harness` | 兼容别名，保留给旧安装路径 |
 | Foundation Readiness | 检查 gbrain、gstack、项目协议、runtime、runner 是否可用 |
 | Foundation Remediation | 基础不完整时自动补齐 harness 文件和项目记忆 |
 | Orchestrator | 项目总控，读取状态和 recipe，决定下一步派谁 |
@@ -128,7 +129,7 @@ Orchestrator 的价值在于：它知道什么时候该叫谁，什么时候不�
 | `MEMORY_ARCHITECTURE.md` | gbrain 和本地文档怎么分工 |
 | `ARCHITECTURE_ASCII.md` | 整体架构图 |
 | `scripts/ai-context-bridge.mjs` | GitNexus 与 gbrain 的项目上下文桥 |
-| `bin/pcm-harness` | 最外层一条命令入口 |
+| `bin/pggg` | 最外层一条命令入口 |
 | `bin/gstack-harness-init` | 安装、自检、记录使用反馈和接管 Codex 的主流程 |
 
 ## 配图生成记录

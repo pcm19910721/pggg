@@ -1,6 +1,29 @@
-# gstack 项目级多智能体工作流
+# PGGG Harness
 
-这份目录整理的是一次关于“如何把 gstack 全量 skill 能力编排成项目级多阶段工作流”的方案。
+PCM's project agent harness for gstack, gbrain, and GitNexus.
+
+这份目录整理的是一套项目级多 Agent 工作流：把 gstack 全量 skill 能力、gbrain 长期记忆和 GitNexus 代码智能编排成可安装、可验证、可交接的项目基础盘子。
+
+## Quick Start
+
+```bash
+git clone <repo-url> pggg
+cd pggg
+npm test
+npm run check:shell
+bin/gstack-harness-self-test
+```
+
+把 harness 安装到目标项目：
+
+```bash
+cd /path/to/target-project
+/path/to/pggg/bin/pggg
+```
+
+公开协作时，`bin/` 是脚本源；目标项目里的 `.gstack/harness/bin/` 和 `.gstack/harness/agents/` 是安装产物。不要提交 `.gitnexus/`、`PROJECT_STATE.md`、`.gstack/project-state.json`、`.gstack/usage-runs/*.json`、`.ai-context/gitnexus-*`、`.ai-context/gbrain-fallback/` 或真实 usage report。
+
+`pggg` 是主入口；`pcm-harness` 暂时保留为兼容别名。
 
 核心定位：
 
@@ -15,7 +38,7 @@
 
 ```text
 这个目录是 harness template source。
-真实使用时，在目标项目目录运行 `pcm-harness`，把基础盘子安装进去并交给 Orchestrator。
+真实使用时，在目标项目目录运行 `pggg`，把基础盘子安装进去并交给 Orchestrator。
 安装过程应尽量少问用户：能检测就检测，能推断就推断，只有高风险或不可逆操作才问。
 ```
 
@@ -72,9 +95,9 @@ scripts/gstack-scheduler.mjs
 docs/SCHEDULER_MODEL.md
 docs/PROBLEM_HANDLING_REPORT.md
 docs/SYSTEM_TUNING_REPORT.md
-.gstack/harness/bin/pcm-harness
-.gstack/harness/bin/pcm-harness.ps1
-.gstack/harness/bin/pcm-harness.cmd
+.gstack/harness/bin/pggg
+.gstack/harness/bin/pggg.ps1
+.gstack/harness/bin/pggg.cmd
 .gstack/harness/bin/gstack-harness-record-run
 .gstack/harness/bin/gstack-harness-usage-report
 .gstack/harness/bin/gstack-harness-enable-report-timer
@@ -171,7 +194,7 @@ node scripts/ai-context-bridge.mjs status
 项目级编排层：
 
 ```text
-pcm-harness
+pggg
 → Foundation Readiness Check
 → Foundation Remediation
 → Code Context / GitNexus bridge artifacts
@@ -223,7 +246,7 @@ Ruflo 的 swarm 思路在这里落成项目级控制面，而不是自动启动�
 
 ```bash
 cd /path/to/target-project
-pcm-harness
+pggg
 ```
 
 它会先安装/升级 harness 基础盘子，再在目标项目目录打开 Codex，并把第一条 Orchestrator 接管提示作为初始 prompt 发出。安装、自检、状态渲染和 Codex 接管应当是一条标准流程。
@@ -234,7 +257,7 @@ pcm-harness
 
 ## 模板源自测
 
-维护 `gstack-multiagent` template source 后，运行：
+维护 PGGG template source 后，运行：
 
 ```bash
 bin/gstack-harness-self-test

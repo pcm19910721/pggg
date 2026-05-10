@@ -19,10 +19,10 @@ gbrain 和 gstack 已经覆盖了大量底层能力。
 本机检测结果：
 
 ```text
-gbrain path: /home/adminpcm/.bun/bin/gbrain
+gbrain path: ~/.bun/bin/gbrain
 version: 0.19.0
 engine: pglite
-database_path: /home/adminpcm/.gbrain/brain.pglite
+database_path: ~/.gbrain/brain.pglite
 pages: 0
 chunks: 0
 links: 0

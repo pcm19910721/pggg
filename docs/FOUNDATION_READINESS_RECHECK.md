@@ -16,7 +16,7 @@ The project is now ready for docs/protocol work, gbrain-backed memory lookup, an
 | Area | Status | Evidence |
 |---|---|---|
 | gbrain | ready | `gbrain list` shows 7 seeded pages; `gbrain query "project gstack-multiagent orchestration current decisions"` returns project decisions and system principles |
-| gstack | ready | `/home/adminpcm/.claude/skills/gstack` has 43 `SKILL.md` files |
+| gstack | ready | `~/.claude/skills/gstack` has 43 `SKILL.md` files |
 | gstack browse | ready | browse CLI exists and responds to `--help` |
 | gstack design | ready | design CLI exists and responds to `--help` |
 | gstack memory sync | partial | `gbrain_sync_mode=off`; acceptable for local work, not cross-machine sync |

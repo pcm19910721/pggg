@@ -13,11 +13,17 @@ Thumbs.db
 .gitnexus/
 .claude/skills/generated/
 .ai-context/runs/
+.ai-context/gbrain-fallback/
 .ai-context/gitnexus-status.json
 .ai-context/gitnexus-index.json
 .ai-context/gitnexus-index.md
 .gstack/project-state.json
 .gstack/readiness-last.json
+.gstack/remediation-last.out
+.gstack/*-last.*
+.gstack/scheduler/
+.gstack/harness/agents/
+.gstack/harness/bin/
 .gstack/usage-runs/*.json
 .gstack/usage-runs/index.jsonl
 PROJECT_STATE.md
@@ -25,6 +31,7 @@ docs/AGENTS_STATUS.md
 docs/CODE_CONTEXT_REPORT.md
 docs/FOUNDATION_READINESS_REPORT.md
 docs/agents/*.json
+docs/USAGE_FEEDBACK_REPORT.md
 output/imagegen/
 .pytest_cache/
 __pycache__/

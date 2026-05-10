@@ -3,11 +3,11 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-pcm-harness - one-command project harness entrypoint
+pggg - one-command project harness entrypoint
 
 Usage:
   cd /path/to/project
-  pcm-harness
+  pggg
 
 This command installs, upgrades, refreshes, records usage, and hands the
 current project to the Orchestrator.

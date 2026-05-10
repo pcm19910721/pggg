@@ -1,0 +1,26 @@
+name: Bug report
+description: Report a harness bug with reproducible evidence.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What failed?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction
+      description: Commands, target project shape, and relevant sanitized output.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Link or paste sanitized report paths, exit codes, and artifacts.
+    validations:
+      required: false

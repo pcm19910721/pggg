@@ -57,12 +57,12 @@ function Resolve-WslHarness {
   $candidates = New-Object System.Collections.Generic.List[string]
 
   try {
-    $scriptHarness = Join-Path $PSScriptRoot "pcm-harness"
+    $scriptHarness = Join-Path $PSScriptRoot "pggg"
     $candidates.Add((Convert-ToWslPath -WindowsPath $scriptHarness))
   } catch {
   }
 
-  $pathHarness = [string](& wsl.exe bash -lc "command -v pcm-harness 2>/dev/null || true")
+  $pathHarness = [string](& wsl.exe bash -lc "command -v pggg 2>/dev/null || command -v pcm-harness 2>/dev/null || true")
   $pathHarness = $pathHarness.Trim()
   if (-not [string]::IsNullOrWhiteSpace($pathHarness)) {
     $candidates.Add($pathHarness)
@@ -74,11 +74,11 @@ function Resolve-WslHarness {
     }
   }
 
-  throw "Cannot find executable pcm-harness in WSL. Put pcm-harness on the WSL PATH or set GSTACK_HARNESS_WSL=/path/to/pcm-harness."
+  throw "Cannot find executable pggg in WSL. Put pggg on the WSL PATH or set GSTACK_HARNESS_WSL=/path/to/pggg."
 }
 
 if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
-  Write-Error "wsl.exe was not found. Install or enable WSL, then run pcm-harness again."
+  Write-Error "wsl.exe was not found. Install or enable WSL, then run pggg again."
   exit 1
 }
 

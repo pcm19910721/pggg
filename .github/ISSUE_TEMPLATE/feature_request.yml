@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest a harness capability or workflow improvement.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow gap or repeated failure should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Describe the desired behavior and expected evidence artifacts.
+    validations:
+      required: true

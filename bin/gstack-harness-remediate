@@ -475,7 +475,7 @@ EOF
 }
 
 seed_gbrain_page "system/orchestration-principles" "Orchestration Principles" "Use gstack skills as the capability layer, GitNexus as the current code-fact layer, and gbrain as durable memory. Do not rewrite gstack skill internals from target projects." "concept"
-seed_gbrain_page "system/harness-product-usage" "Harness Product Usage" "The normal user path is cd target-project && pcm-harness. The harness installs protocol files, runs readiness, routes remediation, records usage, and hands off to Orchestrator." "concept"
+seed_gbrain_page "system/harness-product-usage" "Harness Product Usage" "The normal user path is cd target-project && pggg. The harness installs protocol files, runs readiness, routes remediation, records usage, and hands off to Orchestrator." "concept"
 seed_gbrain_page "system/capability-gap-backlog" "Capability Gap Backlog" "Record repeated warnings, blockers, and handoff failures here so System Tuning can turn them into harness or workflow improvements." "concept"
 seed_gbrain_page "project/$PROJECT_ID/overview" "Project Overview: $PROJECT_ID" "Harness project id: $PROJECT_ID. Target path: $TARGET_DIR" "overview"
 seed_gbrain_page "project/$PROJECT_ID/state" "Project State: $PROJECT_ID" "Local machine-readable state lives in .gstack/project-state.json. Human-readable state lives in PROJECT_STATE.md." "state"

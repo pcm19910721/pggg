@@ -20,7 +20,7 @@
 9. 代码理解、产品判断、实现、review 或 incident 定位前，优先使用 Code Context Agent 的 GitNexus 流程：先跑 node scripts/ai-context-bridge.mjs status；如 stale 且依赖图谱准确，再 refresh；形成稳定摘要后跑 sync-gbrain。接管阶段只检查 stale，不展开完整图谱。UA 只作为 dashboard/onboarding/domain/fallback 增强。
 10. 如果 gbrain query 遇到 PGLite lock 或 timeout，重试一次，仍失败就派发 Problem Handling Agent。
 11. 不要重写 gstack skill 本体。
-12. Foundation Readiness 如果是 unknown/stale，先跑 .gstack/harness/bin/gstack-harness-readiness --target "/home/adminpcm/gstack-multiagent"。如果是 partial/blocked，先跑 .gstack/harness/bin/gstack-harness-remediate --target "/home/adminpcm/gstack-multiagent"，再回到 readiness 复检。
+12. Foundation Readiness 如果是 unknown/stale，先跑 .gstack/harness/bin/gstack-harness-readiness --target "/path/to/gstack-multiagent"。如果是 partial/blocked，先跑 .gstack/harness/bin/gstack-harness-remediate --target "/path/to/gstack-multiagent"，再回到 readiness 复检。
 13. 先输出当前 phase、Foundation Readiness、blockers/warnings、推荐 recipe、推荐 agent、是否需要刷新 memory/code context，以及简短原因。
 14. 本轮开始时可以用 .gstack/harness/bin/gstack-harness-record-run --event session_start --status in_progress 记录快照。
 15. 完成状态更新后必须用 .gstack/harness/bin/gstack-harness-record-run --event session_end --status completed 记录 usage run；如有卡点、用户纠正、能力缺口、warning 或 blocker，把对应参数带上。
@@ -29,7 +29,7 @@
 当前安装器给出的初始判断：
 
 - Project ID: gstack-multiagent
-- Target: /home/adminpcm/gstack-multiagent
+- Target: /path/to/gstack-multiagent
 - Install mode: docs-only
 - Foundation verdict: ready
 - gbrain query: timeout
