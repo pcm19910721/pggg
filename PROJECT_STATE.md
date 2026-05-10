@@ -41,7 +41,7 @@
 ## Quality Gates
 
 - Foundation Readiness: ready
-- Code Context: ready
+- Code Context: stale
 - Health: unknown
 - Browser QA: not_run
 - Windows QA: skipped
@@ -65,7 +65,7 @@
   - Optional UA knowledge graph: .understand-anything/knowledge-graph.json
   - Optional UA domain graph: .understand-anything/domain-graph.json
   - Optional UA diff overlay: .understand-anything/diff-overlay.json
-  - Last updated: 2026-05-10T08:48:59.607Z
+  - Last updated: 2026-05-10T09:04:24.365Z
   - Skip reason:
 - Health:
   - Command: not_required

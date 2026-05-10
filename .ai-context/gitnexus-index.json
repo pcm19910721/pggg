@@ -3,11 +3,11 @@
   "repo_path": "/home/adminpcm/gstack-multiagent",
   "branch": "main",
   "remote_url": null,
-  "git_head": "ebc651774158058aa072cd39fac572eded9e7adc",
+  "git_head": "98e0fefd637185056a755a6aa0378c8f3cb7f3ae",
   "gitnexus_repo": "gstack-multiagent",
   "gitnexus_meta_path": "/home/adminpcm/gstack-multiagent/.gitnexus/meta.json",
   "indexed": true,
-  "stale": false,
+  "stale": true,
   "last_commit": "ebc651774158058aa072cd39fac572eded9e7adc",
   "indexed_at": "2026-05-10T08:42:03.137Z",
   "stats": {

@@ -165,10 +165,12 @@ fi
 
 GIT_STATUS="missing"
 BRANCH="none"
+GIT_HEAD=""
 if git -C "$TARGET_DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
   GIT_STATUS="ready"
   BRANCH="$(git -C "$TARGET_DIR" branch --show-current 2>/dev/null || true)"
   BRANCH="${BRANCH:-unknown}"
+  GIT_HEAD="$(git -C "$TARGET_DIR" rev-parse HEAD 2>/dev/null || true)"
 fi
 
 GBRAIN_STATUS="unavailable"
@@ -275,6 +277,7 @@ DESIGN_STATUS="$DESIGN_STATUS" \
 GBRAIN_SYNC_MODE="$GBRAIN_SYNC_MODE" \
 GIT_STATUS="$GIT_STATUS" \
 BRANCH="$BRANCH" \
+GIT_HEAD="$GIT_HEAD" \
 GBRAIN_STATUS="$GBRAIN_STATUS" \
 GBRAIN_PAGES="$GBRAIN_PAGES" \
 GBRAIN_CORE_MISSING="$GBRAIN_CORE_MISSING" \
@@ -405,6 +408,8 @@ function readCodeContextStatus(state) {
   const reportPath = path.join(target, 'docs/CODE_CONTEXT_REPORT.md');
   const status = readJson(statusPath, null);
   if (status?.stale) return 'stale';
+  if (env.GIT_HEAD && status?.last_commit && env.GIT_HEAD !== status.last_commit) return 'stale';
+  if (env.GIT_HEAD && status?.git_head && env.GIT_HEAD !== status.git_head) return 'stale';
   if (status?.indexed) return 'ready';
   if (fs.existsSync(reportPath)) {
     const match = fs.readFileSync(reportPath, 'utf8').match(/^Status:\s*(\S+)/m);

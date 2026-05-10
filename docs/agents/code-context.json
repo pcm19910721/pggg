@@ -1,18 +1,18 @@
 {
   "schema": "gstack-harness.agent_status.v1",
-  "generated_at": "2026-05-10T08:48:53.390Z",
+  "generated_at": "2026-05-10T09:05:18.362Z",
   "event": "foundation_readiness",
   "project_id": "gstack-multiagent",
   "agent": "code-context",
   "name": "Code Context Agent",
-  "status": "completed",
+  "status": "warning",
   "evidence": [
     "code context report: docs/CODE_CONTEXT_REPORT.md",
     "gitnexus status: .ai-context/gitnexus-status.json",
     "provider: gitnexus",
-    "status: ready"
+    "status: stale"
   ],
   "blockers": [],
   "warnings": [],
-  "next_action": "none"
+  "next_action": "run node scripts/ai-context-bridge.mjs status"
 }

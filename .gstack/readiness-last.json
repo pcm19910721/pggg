@@ -11,7 +11,7 @@
   "gstack": "ready",
   "git": "ready",
   "runtime": "not_required",
-  "code_context": "ready",
+  "code_context": "stale",
   "blockers": [],
   "warnings": [],
   "next_recommended_agent": "Orchestrator",

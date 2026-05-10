@@ -1,6 +1,6 @@
 # Agent Status
 
-Generated: 2026-05-10T08:48:53.390Z
+Generated: 2026-05-10T09:05:18.362Z
 Project: gstack-multiagent
 Event: foundation_readiness
 
@@ -12,7 +12,7 @@ Event: foundation_readiness
 | Problem Handling Agent | not_needed | docs/agents/problem-handling.json | none |
 | Memory / GBrain Agent | completed | docs/agents/memory-gbrain.json | run sync-gbrain or repair-gbrain if pages are stale |
 | System Tuning Agent | not_needed | docs/agents/system-tuning.json | none |
-| Code Context Agent | completed | docs/agents/code-context.json | none |
+| Code Context Agent | warning | docs/agents/code-context.json | run node scripts/ai-context-bridge.mjs status |
 | Product Agent | not_run | docs/agents/product.json | create product brief when product scope is requested |
 | Planning Agent | not_run | docs/agents/planning.json | create implementation plan for non-trivial changes |
 | Design Agent | not_run | docs/agents/design.json | run design workflow when UI/UX is in scope |

@@ -25,10 +25,10 @@ source: .gitnexus/meta.json
 - GitNexus repo: gstack-multiagent
 - Repo path: /home/adminpcm/gstack-multiagent
 - Branch: main
-- Git HEAD: ebc651774158058aa072cd39fac572eded9e7adc
+- Git HEAD: 98e0fefd637185056a755a6aa0378c8f3cb7f3ae
 - Indexed commit: ebc651774158058aa072cd39fac572eded9e7adc
 - Indexed at: 2026-05-10T08:42:03.137Z
-- Stale: no
+- Stale: yes
 
 ## Stats
 
