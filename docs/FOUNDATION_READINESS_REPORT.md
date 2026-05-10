@@ -20,7 +20,7 @@ Verdict: ready
 | project protocol | ready | harness state and reports present |
 | git state | ready | branch: main |
 | runtime | not_required | mode: docs-only; test: not_required; dev: not_required |
-| code context | stale | docs/CODE_CONTEXT_REPORT.md / .ai-context/gitnexus-status.json |
+| code context | ready | docs/CODE_CONTEXT_REPORT.md / .ai-context/gitnexus-status.json |
 
 ## Blockers
 

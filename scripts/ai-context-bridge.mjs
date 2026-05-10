@@ -498,6 +498,20 @@ function isExecutableFile(file) {
   }
 }
 
+function localGitNexusCandidates() {
+  const candidates = [];
+  const home = process.env.HOME;
+  if (home) {
+    const nvmRoot = path.join(home, '.nvm', 'versions', 'node');
+    try {
+      for (const version of fsSync.readdirSync(nvmRoot)) {
+        candidates.push(path.join(nvmRoot, version, 'bin', 'gitnexus'));
+      }
+    } catch {}
+  }
+  return candidates.filter(isExecutableFile).sort().reverse();
+}
+
 function sameCommand(a, b) {
   return JSON.stringify(a || []) === JSON.stringify(b || []);
 }
@@ -507,6 +521,9 @@ function gitNexusCommands(config) {
   const fallback = config.gitnexus?.fallback_command || ['npx', '-y', 'gitnexus@latest'];
   const commands = [];
   if (config.gitnexus?.prefer_local !== false && commandExists('gitnexus')) commands.push(['gitnexus']);
+  if (config.gitnexus?.prefer_local !== false) {
+    for (const candidate of localGitNexusCandidates()) commands.push([candidate]);
+  }
   commands.push(configured);
   commands.push(fallback);
   return commands.filter((command, index, all) =>
@@ -1256,7 +1273,10 @@ async function runGitNexus(config, args, cwd = config.repo_path) {
   let lastResult = null;
   for (const command of gitNexusCommands(config)) {
     const [bin, ...prefix] = command;
-    const result = run(bin, [...prefix, ...args], { cwd });
+    const result = run(bin, [...prefix, ...args], {
+      cwd,
+      env: withCommandDirOnPath(process.env, bin),
+    });
     lastResult = result;
     if (result.ok || result.error?.code !== 'ENOENT') return result;
   }
@@ -1289,6 +1309,7 @@ async function commandRefresh(args) {
   const summary = summarizeMeta(config, meta, metaPath);
   const markdown = markdownIndexPage(config, summary);
 
+  await writeJson(path.join(ROOT, '.ai-context', 'gitnexus-status.json'), summary);
   await writeJson(path.join(ROOT, '.ai-context', 'gitnexus-index.json'), summary);
   await fs.writeFile(path.join(ROOT, '.ai-context', 'gitnexus-index.md'), markdown, 'utf-8');
   await updateCodeContextArtifacts(config, summary, 'refresh');
