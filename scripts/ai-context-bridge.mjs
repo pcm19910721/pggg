@@ -403,20 +403,20 @@ function markdownIndexPage(config, summary) {
   const vector = summary.capabilities?.vectorSearch || {};
   return `---
 type: gitnexus_index
-project: ${config.project_id}
-project_uid: ${projectUid(config, summary)}
-repo_path: ${summary.repo_path}
-gitnexus_repo: ${summary.gitnexus_repo}
-remote_url: ${summary.remote_url || ''}
-last_commit: ${summary.last_commit || ''}
-indexed_at: ${summary.indexed_at || ''}
-files: ${stats.files ?? ''}
-nodes: ${stats.nodes ?? ''}
-edges: ${stats.edges ?? ''}
-communities: ${stats.communities ?? ''}
-processes: ${stats.processes ?? ''}
-embeddings: ${stats.embeddings ?? ''}
-vector_status: ${vector.status || 'unknown'}
+project: ${yamlValue(config.project_id)}
+project_uid: ${yamlValue(projectUid(config, summary))}
+repo_path: ${yamlValue(summary.repo_path)}
+gitnexus_repo: ${yamlValue(summary.gitnexus_repo)}
+remote_url: ${yamlValue(summary.remote_url || '')}
+last_commit: ${yamlValue(summary.last_commit || '')}
+indexed_at: ${yamlValue(summary.indexed_at || '')}
+files: ${yamlValue(stats.files ?? '')}
+nodes: ${yamlValue(stats.nodes ?? '')}
+edges: ${yamlValue(stats.edges ?? '')}
+communities: ${yamlValue(stats.communities ?? '')}
+processes: ${yamlValue(stats.processes ?? '')}
+embeddings: ${yamlValue(stats.embeddings ?? '')}
+vector_status: ${yamlValue(vector.status || 'unknown')}
 source: .gitnexus/meta.json
 ---
 

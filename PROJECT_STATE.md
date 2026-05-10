@@ -5,10 +5,10 @@
 - Phase: foundation
 - Goal: Project-level gstack harness installed by local template source.
 - Branch: main
-- Last updated: 2026-05-03
+- Last updated: 2026-05-10
 - Last completed agent: Foundation Remediation Agent
-- Next recommended agent: Problem Handling Agent
-- Next recommended recipe: Problem Handling preflight, then R0 Restore / Resume Context
+- Next recommended agent: Orchestrator
+- Next recommended recipe: R0 Restore / Resume Context
 - Workspace mode: target_project
 
 ## Foundation
@@ -18,7 +18,7 @@
 - Remediation: fixed
 - Remediation report: docs/FOUNDATION_REMEDIATION_REPORT.md
 - gbrain: ready
-- gbrain query: timeout
+- gbrain query: ready
 - gstack: ready
 - Project protocol: ready
 - Structured state: .gstack/project-state.json
@@ -41,7 +41,7 @@
 ## Quality Gates
 
 - Foundation Readiness: ready
-- Code Context: ready
+- Code Context: stale
 - Health: unknown
 - Browser QA: not_run
 - Windows QA: skipped
@@ -65,7 +65,7 @@
   - Optional UA knowledge graph: .understand-anything/knowledge-graph.json
   - Optional UA domain graph: .understand-anything/domain-graph.json
   - Optional UA diff overlay: .understand-anything/diff-overlay.json
-  - Last updated: 2026-05-03T05:31:41.737Z
+  - Last updated: 2026-05-10T08:38:48.201Z
   - Skip reason:
 - Health:
   - Command: not_required

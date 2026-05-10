@@ -9,26 +9,38 @@ Continuous tuning means improving the project-level multi-agent system: which ag
 gbrain is the canonical long-term memory source. If gbrain conflicts with local memory docs, prefer gbrain and update the stale docs.
 When writing durable memory, follow `GBRAIN_SCHEMA.md`.
 
+## Lightweight Handoff Rule
+
+When the user only says "接管", "继续", "恢复现场", or "继续项目", perform lightweight handoff only:
+
+- Read minimal state: `PROJECT_STATE.md`, `.gstack/project-state.json`, and project handoff/state pages if available.
+- Check whether GitNexus or gbrain memory is stale, but do not expand full code graphs, reports, or long history.
+- Output only current phase, readiness, blockers/warnings, recommended next recipe/agent, and whether memory/code context refresh is needed.
+- Do not modify files or start business work unless the user explicitly asks.
+
+Principle: handoff restores navigation state, not the full project context. Expand details only for the next concrete task.
+
 Before doing substantial work:
 
 1. Read `PROJECT_STATE.md`.
-2. Read `.ai-context/project.json` and `docs/CODE_CONTEXT_REPORT.md` if present.
-3. Read `HARNESS_PRODUCT_USAGE.md`.
-4. Read `GSTACK_SKILL_REGISTRY.md`.
-5. Read `WORKFLOW_RECIPES.md`.
-6. Read `ORCHESTRATOR_RUNBOOK.md`.
-7. Read `SYSTEM_TUNING_LOOP.md`.
-8. Read `MEMORY_ARCHITECTURE.md`.
-9. Read `GBRAIN_SCHEMA.md`.
-10. For existing-code product, build, review, or incident work, run `node scripts/ai-context-bridge.mjs status` when `.ai-context/project.json` exists; refresh GitNexus only when stale and graph accuracy matters.
-11. Query relevant gbrain memory if available.
-12. Read `AGENT_ORCHESTRATOR.md`.
-13. Read `AGENT_WORKFLOWS.md`.
-14. Check Foundation Readiness. If readiness is unknown, partial, or blocked, run the Foundation Readiness / Remediation workflow before business work.
-15. Classify the user's request.
-16. Choose the appropriate workflow recipe and gstack skills.
-17. After completing work, update `PROJECT_STATE.md` with artifact/evidence references and system tuning notes.
-18. Write durable project/agent/system learnings to gbrain using `GBRAIN_SCHEMA.md`.
+2. Read `docs/AGENT_RUN_CONTRACT.md`, `docs/AGENT_MANIFEST_SCHEMA.md`, and `.gstack/agents/*.yaml` if present.
+3. Read `.ai-context/project.json` and `docs/CODE_CONTEXT_REPORT.md` if present.
+4. Read `HARNESS_PRODUCT_USAGE.md`.
+5. Read `GSTACK_SKILL_REGISTRY.md`.
+6. Read `WORKFLOW_RECIPES.md`.
+7. Read `ORCHESTRATOR_RUNBOOK.md`.
+8. Read `SYSTEM_TUNING_LOOP.md`.
+9. Read `MEMORY_ARCHITECTURE.md`.
+10. Read `GBRAIN_SCHEMA.md`.
+11. For existing-code product, build, review, or incident work, run `node scripts/ai-context-bridge.mjs status` when `.ai-context/project.json` exists; refresh GitNexus only when stale and graph accuracy matters.
+12. Query relevant gbrain memory if available.
+13. Read `AGENT_ORCHESTRATOR.md`.
+14. Read `AGENT_WORKFLOWS.md`.
+15. Check Foundation Readiness. If readiness is unknown, partial, or blocked, run the Foundation Readiness / Remediation workflow before business work.
+16. Classify the user's request.
+17. Choose the appropriate workflow recipe and gstack skills.
+18. After completing work, update `PROJECT_STATE.md` with artifact/evidence references and system tuning notes.
+19. Write durable project/agent/system learnings to gbrain using `GBRAIN_SCHEMA.md`.
 
 Prefer real verification:
 
@@ -66,7 +78,7 @@ Quality gate before shipping:
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **gstack-multiagent** (613 symbols, 914 relationships, 48 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **gstack-multiagent** (839 symbols, 1360 relationships, 73 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

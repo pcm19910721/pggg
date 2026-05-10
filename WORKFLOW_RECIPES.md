@@ -24,6 +24,9 @@ PROJECT_STATE.md
 .gstack/project-state.json 如果存在
 .gstack/harness/agents/TEAM.md 如果存在
 .gstack/harness/agents/problem-handling.md 如果存在
+docs/AGENT_RUN_CONTRACT.md 如果存在
+docs/AGENT_MANIFEST_SCHEMA.md 如果存在
+.gstack/agents/*.yaml 如果存在
 docs/PROBLEM_HANDLING_REPORT.md 如果存在
 docs/SYSTEM_TUNING_REPORT.md 如果存在
 docs/CODE_CONTEXT_REPORT.md 如果存在
@@ -56,6 +59,15 @@ system tuning notes
 ```
 
 阶段 skill 可以写自己的报告和修代码，但不直接写最终项目状态。最终状态由总控合并。
+
+每次执行 recipe 后，总控还必须按 `docs/AGENT_RUN_CONTRACT.md` 检查 handoff：
+
+```text
+status 必须是 passed / failed / partial / blocked / skipped / fallback 之一
+artifacts 必须存在，且 fallback artifact 不能只写成 warning
+quality gate 更新必须包含 command / exit_code / artifact / checked_at
+真实 session 必须写入 .gstack/usage-runs/
+```
 
 ## Recipe 格式
 
@@ -394,8 +406,8 @@ GitNexus context <文件路径或符号>
 ```text
 node scripts/ai-context-bridge.mjs status
 → 如果 stale：node scripts/ai-context-bridge.mjs refresh
-→ node scripts/ai-context-bridge.mjs postchange --scope all
-→ 高风险符号：node scripts/ai-context-bridge.mjs postchange --scope all --impact SymbolName
+→ node scripts/ai-context-bridge.mjs postchange --scope all --test-command "<test command>" --test-exit-code "<exit code>" --test-artifact "<artifact path>"
+→ 高风险符号：node scripts/ai-context-bridge.mjs postchange --scope all --impact SymbolName --test-command "<test command>" --test-exit-code "<exit code>" --test-artifact "<artifact path>"
 → GitNexus query/context：这次改动影响哪些组件、层、业务流程？最该补哪些测试？
 → 可选 UA dashboard/diff overlay 只用于可视化复核
 ```
@@ -811,7 +823,7 @@ Review: passing/failing
 流程：
 
 ```text
-R0.5 提交前影响面：bridge status → 必要时 refresh → postchange / GitNexus impact
+R0.5 提交前影响面：bridge status → 必要时 refresh → postchange / GitNexus impact，带上测试 command / exit code / artifact
 → /health
 → /review
 → /cso 如果涉及权限/登录/支付/数据/LLM trust boundary
@@ -822,7 +834,7 @@ R0.5 提交前影响面：bridge status → 必要时 refresh → postchange / G
 
 ```text
 health report
-impact analysis / diff overlay
+impact analysis / diff overlay with test evidence
 review report
 security report 可选
 performance report 可选

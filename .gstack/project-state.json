@@ -13,15 +13,15 @@
     "remediation": "fixed",
     "remediation_report": "docs/FOUNDATION_REMEDIATION_REPORT.md",
     "gbrain": "ready",
-    "gbrain_query": "timeout",
+    "gbrain_query": "ready",
     "gstack": "ready",
     "project_protocol": "ready",
     "runtime": "not_required",
     "runners": "ready",
     "memory_policy": "ready",
-    "problem_handling_required": true,
-    "gbrain_pages": "39",
-    "last_readiness_check": "2026-05-03T13:31:31+08:00",
+    "problem_handling_required": false,
+    "gbrain_pages": "50",
+    "last_readiness_check": "2026-05-10T16:11:54+08:00",
     "last_remediation_at": "2026-05-03T13:30:02+08:00",
     "remediation_actions": [
       {
@@ -69,7 +69,9 @@
         "target": "docs/CODE_CONTEXT_REPORT.md",
         "evidence": "ran GitNexus bridge status"
       }
-    ]
+    ],
+    "gbrain_project_memory_missing": [],
+    "gbrain_project_memory_stale": []
   },
   "agents": {
     "team": ".gstack/harness/agents/TEAM.md",
@@ -108,14 +110,14 @@
   },
   "quality_gates": {
     "foundation_readiness": "ready",
-    "code_context": "ready",
+    "code_context": "stale",
     "health": "unknown",
     "browser_qa": "not_run",
     "windows_qa": "skipped",
     "review": "not_run",
     "security": "not_run",
     "performance": "not_run",
-    "deployment": "not_started"
+    "deployment": "blocked"
   },
   "artifacts": {
     "foundation_readiness_report": "docs/FOUNDATION_READINESS_REPORT.md",
@@ -134,14 +136,49 @@
     "optional_ua_diff_overlay": ".understand-anything/diff-overlay.json",
     "usage_runs": ".gstack/usage-runs",
     "foundation_readiness_runner": ".gstack/harness/bin/gstack-harness-readiness",
-    "usage_report_timer": ".gstack/harness/bin/gstack-harness-enable-report-timer"
+    "usage_report_timer": ".gstack/harness/bin/gstack-harness-enable-report-timer",
+    "agents_status_report": "docs/AGENTS_STATUS.md",
+    "agents_status_dir": "docs/agents",
+    "agent_status_runner": ".gstack/harness/bin/gstack-harness-agent-status",
+    "agent_orchestrator_status": "docs/agents/orchestrator.json",
+    "agent_foundation_readiness_status": "docs/agents/foundation-readiness.json",
+    "agent_foundation_remediation_status": "docs/agents/foundation-remediation.json",
+    "agent_problem_handling_status": "docs/agents/problem-handling.json",
+    "agent_memory_gbrain_status": "docs/agents/memory-gbrain.json",
+    "agent_system_tuning_status": "docs/agents/system-tuning.json",
+    "agent_code_context_status": "docs/agents/code-context.json",
+    "agent_product_status": "docs/agents/product.json",
+    "agent_planning_status": "docs/agents/planning.json",
+    "agent_design_status": "docs/agents/design.json",
+    "agent_architecture_status": "docs/agents/architecture.json",
+    "agent_build_status": "docs/agents/build.json",
+    "agent_reality_test_status": "docs/agents/reality-test.json",
+    "agent_review_status": "docs/agents/review.json",
+    "agent_security_perf_status": "docs/agents/security-perf.json",
+    "agent_release_status": "docs/agents/release.json",
+    "agent_maintenance_status": "docs/agents/maintenance.json"
   },
   "usage": {
     "runs_dir": ".gstack/usage-runs",
     "index": ".gstack/usage-runs/index.jsonl",
-    "latest_run": ".gstack/usage-runs/20260503T053119Z-harness_init-86180.json",
-    "latest_event": "harness_init",
-    "latest_recorded_at": "2026-05-03T13:31:19+08:00"
+    "latest_run": ".gstack/usage-runs/20260510T081341Z-engineering_closeout-522160.json",
+    "latest_event": "engineering_closeout",
+    "latest_recorded_at": "2026-05-10T16:13:41+08:00",
+    "latest_agents": [
+      "Orchestrator",
+      "memory-gbrain",
+      "code-context"
+    ],
+    "latest_skills": [
+      "gitnexus-cli",
+      "verification-before-completion",
+      "finishing-a-development-branch"
+    ],
+    "latest_tools": [
+      "self-test",
+      "gitnexus",
+      "gbrain"
+    ]
   },
   "problem_handling": null,
   "system_tuning": {
@@ -150,25 +187,34 @@
   },
   "blockers": [],
   "warnings": [
-    "gbrain_query_timeout",
-    "gbrain_sync_off"
+    "gitnexus_detect_changes_critical_due_large_dirty_worktree"
   ],
-  "problem_handling_required": true,
-  "next_recommended_agent": "Problem Handling Agent",
-  "next_recommended_recipe": "Problem Handling preflight, then R0 Restore / Resume Context",
+  "problem_handling_required": false,
+  "next_recommended_agent": "Orchestrator",
+  "next_recommended_recipe": "R0 Restore / Resume Context",
   "code_context": {
     "provider": "gitnexus",
-    "status": "ready",
-    "operation": "status",
+    "status": "stale",
+    "operation": "sync-gbrain",
     "repo": "gstack-multiagent",
     "branch": "main",
     "indexed": true,
-    "stale": false,
-    "git_head": "baa054a87030618e947220dc3711fc976bc641fd",
-    "indexed_commit": "baa054a87030618e947220dc3711fc976bc641fd",
-    "indexed_at": "2026-05-03T05:28:15.500Z",
+    "stale": true,
+    "git_head": "211a7648265a0a48eeab09a99cea8482c3cfb198",
+    "indexed_commit": "c291739b273c260dc6ab7a7e5a75fdea34a3a6a5",
+    "indexed_at": "2026-05-10T08:10:24.015Z",
     "latest_run": null,
     "latest_risk": null,
-    "updated_at": "2026-05-03T05:31:41.733Z"
+    "updated_at": "2026-05-10T08:38:48.198Z"
+  },
+  "release": {
+    "status": "blocked_by_environment",
+    "blockers": [
+      "no_remote_repository",
+      "no_deploy_target"
+    ],
+    "remote_url": "",
+    "production_url": "not_required",
+    "next_action": "configure a remote repository and deploy target before release"
   }
 }

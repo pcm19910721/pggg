@@ -14,6 +14,17 @@ Continuous tuning means improving the project-level multi-agent system: which ag
 gbrain is the canonical long-term memory source. If gbrain conflicts with local memory docs, prefer gbrain and update the stale docs.
 When writing durable memory, follow `GBRAIN_SCHEMA.md`.
 
+## Lightweight Handoff Rule
+
+When the user only says "接管", "继续", "恢复现场", or "继续项目", perform lightweight handoff only:
+
+- Read minimal state: `PROJECT_STATE.md`, `.gstack/project-state.json`, and project handoff/state pages if available.
+- Check whether GitNexus or gbrain memory is stale, but do not expand full code graphs, reports, or long history.
+- Output only current phase, readiness, blockers/warnings, recommended next recipe/agent, and whether memory/code context refresh is needed.
+- Do not modify files or start business work unless the user explicitly asks.
+
+Principle: handoff restores navigation state, not the full project context. Expand details only for the next concrete task.
+
 Before doing substantial work:
 
 1. Read `PROJECT_STATE.md`.

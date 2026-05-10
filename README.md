@@ -62,6 +62,9 @@ MEMORY_ARCHITECTURE.md
 GBRAIN_SCHEMA.md
 docs/AGENT_ORCHESTRATOR.md
 docs/AGENT_WORKFLOWS.md
+docs/AGENT_RUN_CONTRACT.md
+docs/AGENT_MANIFEST_SCHEMA.md
+.gstack/agents/
 docs/CODEX_START_PROMPT.md
 docs/FOUNDATION_REMEDIATION_REPORT.md
 docs/CODE_CONTEXT_REPORT.md
@@ -69,6 +72,8 @@ docs/CODEBASE_MAP_REPORT.md
 .ai-context/project.json
 .ai-context/FIELD_CONTRACT.md
 scripts/ai-context-bridge.mjs
+scripts/gstack-scheduler.mjs
+docs/SCHEDULER_MODEL.md
 docs/PROBLEM_HANDLING_REPORT.md
 docs/SYSTEM_TUNING_REPORT.md
 .gstack/harness/bin/pcm-harness
@@ -79,6 +84,7 @@ docs/SYSTEM_TUNING_REPORT.md
 .gstack/harness/bin/gstack-harness-enable-report-timer
 .gstack/harness/bin/gstack-harness-readiness
 .gstack/harness/bin/gstack-harness-remediate
+.gstack/harness/bin/gstack-harness-schedule
 .gstack/harness/agents/TEAM.md
 .gstack/harness/agents/problem-handling.md
 ```
@@ -160,6 +166,7 @@ pcm-harness
 → Code Context / GitNexus bridge artifacts
 → GStack Skill Registry
 → Orchestrator
+→ Scheduler Control Plane
 → Workflow Recipes
 → Project State / Evidence Gates
 → Machine-Readable State
@@ -169,6 +176,18 @@ pcm-harness
 → GBrain Schema
 → Codex Start Prompt
 ```
+
+## 调度控制面
+
+Ruflo 的 swarm 思路在这里落成项目级控制面，而不是自动启动一堆真实 worker。入口是：
+
+```bash
+.gstack/harness/bin/gstack-harness-schedule init --target .
+.gstack/harness/bin/gstack-harness-schedule register-agent --target . --agent-id build --role "Build Agent" --domain integration --capabilities coding,implementation
+.gstack/harness/bin/gstack-harness-schedule schedule --target . --task-id task-1 --type coding --priority high --description "Implement scoped change with tests"
+```
+
+状态写到 `.gstack/scheduler/{swarm,agents,tasks,queues}.json`。详细参数流见 `docs/SCHEDULER_MODEL.md`。
 
 ## 建议阅读顺序
 

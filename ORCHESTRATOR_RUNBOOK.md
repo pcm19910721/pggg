@@ -24,16 +24,18 @@ gbrain = 长期事实源
 ```text
 1. 读取 PROJECT_STATE.md 和 .gstack/project-state.json 如果存在
 2. 读取 .gstack/harness/agents/TEAM.md 和 problem-handling.md 如果存在
-3. 读取 GSTACK_SKILL_REGISTRY.md
-4. 读取 WORKFLOW_RECIPES.md
-5. 读取 SYSTEM_TUNING_LOOP.md
-6. 读取 MEMORY_ARCHITECTURE.md
-7. 读取 GBRAIN_SCHEMA.md
-8. 读取 gbrain 项目核心页：project/<id>/overview、state、foundation-readiness、code-context、quality-gates、gitnexus-index、architecture、hotspots、handoff
-9. 读取 gstack native logs
-10. 检查 git status / diff / branch / commit
-11. 检查 .ai-context/project.json 和 GitNexus status；如 gbrain 项目页缺失或 stale，先运行 node scripts/ai-context-bridge.mjs sync-gbrain --dry-run，再运行 node scripts/ai-context-bridge.mjs sync-gbrain；如需可视化/onboarding/domain/fallback，再检查 .understand-anything artifacts
-12. 判断 Foundation Readiness 是否 known + ready
+3. 读取 docs/AGENT_RUN_CONTRACT.md 和 docs/AGENT_MANIFEST_SCHEMA.md 如果存在
+4. 读取 .gstack/agents/*.yaml 如果存在
+5. 读取 GSTACK_SKILL_REGISTRY.md
+6. 读取 WORKFLOW_RECIPES.md
+7. 读取 SYSTEM_TUNING_LOOP.md
+8. 读取 MEMORY_ARCHITECTURE.md
+9. 读取 GBRAIN_SCHEMA.md
+10. 读取 gbrain 项目核心页：project/<id>/overview、state、foundation-readiness、code-context、quality-gates、gitnexus-index、architecture、hotspots、handoff
+11. 读取 gstack native logs
+12. 检查 git status / diff / branch / commit
+13. 检查 .ai-context/project.json 和 GitNexus status；如本地 Code Context 报告与 .gitnexus/meta.json commit 不一致，先运行 node scripts/ai-context-bridge.mjs status；如 gbrain 项目页缺失或 stale，先运行 node scripts/ai-context-bridge.mjs sync-gbrain --dry-run，再运行 node scripts/ai-context-bridge.mjs sync-gbrain；如 sync-gbrain fallback，记录 fallback artifact 并按 contract 路由；如需可视化/onboarding/domain/fallback，再检查 .understand-anything artifacts
+14. 判断 Foundation Readiness 是否 known + ready
 ```
 
 推荐 gbrain 查询：
