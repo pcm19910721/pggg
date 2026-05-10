@@ -38,6 +38,12 @@ gbrain = 长期事实源
 14. 判断 Foundation Readiness 是否 known + ready
 ```
 
+`PROJECT_STATE.md`, `.gstack/project-state.json`, `.ai-context/gitnexus-*`,
+`docs/CODE_CONTEXT_REPORT.md`, `docs/FOUNDATION_READINESS_REPORT.md`,
+`docs/AGENTS_STATUS.md`, and `docs/agents/*.json` are local runtime snapshots.
+They may exist in the workspace for handoff, but they are ignored by git because
+they contain commit hashes and timestamps.
+
 推荐 gbrain 查询：
 
 ```bash

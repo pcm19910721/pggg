@@ -50,8 +50,6 @@ gbrain = 长期记忆事实源；本地文档 = 可读快照和交接产物
 
 ```text
 CLAUDE.md
-PROJECT_STATE.md
-.gstack/project-state.json
 .gstack/usage-runs/
 HARNESS_PRODUCT_USAGE.md
 GSTACK_SKILL_REGISTRY.md
@@ -66,8 +64,6 @@ docs/AGENT_RUN_CONTRACT.md
 docs/AGENT_MANIFEST_SCHEMA.md
 .gstack/agents/
 docs/CODEX_START_PROMPT.md
-docs/FOUNDATION_REMEDIATION_REPORT.md
-docs/CODE_CONTEXT_REPORT.md
 docs/CODEBASE_MAP_REPORT.md
 .ai-context/project.json
 .ai-context/FIELD_CONTRACT.md
@@ -87,6 +83,21 @@ docs/SYSTEM_TUNING_REPORT.md
 .gstack/harness/bin/gstack-harness-schedule
 .gstack/harness/agents/TEAM.md
 .gstack/harness/agents/problem-handling.md
+```
+
+本地运行态快照由 harness/bridge 生成，但不作为版本化源文件提交：
+
+```text
+PROJECT_STATE.md
+.gstack/project-state.json
+.gstack/readiness-last.json
+.ai-context/gitnexus-status.json
+.ai-context/gitnexus-index.json
+.ai-context/gitnexus-index.md
+docs/CODE_CONTEXT_REPORT.md
+docs/FOUNDATION_READINESS_REPORT.md
+docs/AGENTS_STATUS.md
+docs/agents/*.json
 ```
 
 可选增强：
