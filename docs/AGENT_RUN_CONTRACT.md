@@ -1,0 +1,290 @@
+# Agent Run Contract
+
+This contract defines how every project-level agent run starts, proves work, hands off, and records evidence.
+
+It exists because agent names are not the product. The product is a trustworthy state machine that later agents can use without guessing.
+
+## Scope
+
+This contract applies to every project-level agent:
+
+- required core agents;
+- default capability agents;
+- project-defined agents;
+- read-only rehearsals;
+- writable implementation, review, QA, and release runs.
+
+An agent may own a report or artifact. Only the Orchestrator owns final project-state merge.
+
+## Status Values
+
+Use exactly these values.
+
+| Status | Meaning | Allowed next step |
+|---|---|---|
+| `passed` | Required work completed and evidence exists. | Continue to next recipe. |
+| `failed` | Work ran and produced a negative result. | Route to the responsible fixing agent. |
+| `partial` | Some evidence exists, but a required side path is incomplete. | Continue only for low-risk work with explicit warning. |
+| `blocked` | Required dependency, gate, or memory layer is unavailable. | Stop business flow and route to Problem Handling or Remediation. |
+| `skipped` | Work was intentionally not run with a concrete reason. | Continue only if the skip reason is acceptable for the recipe. |
+| `fallback` | Primary output failed, but equivalent local fallback artifacts were written. | Treat as `partial` or `blocked` depending on the gate. |
+
+`fallback` is first-class evidence, not a loose warning. The handoff must name the fallback artifact path.
+
+## Lifecycle
+
+Every run follows this sequence.
+
+```text
+preflight
+→ dispatch
+→ execute
+→ evidence
+→ merge
+→ memory
+→ usage
+```
+
+### 1. Preflight
+
+Read these before choosing work:
+
+```text
+PROJECT_STATE.md
+.gstack/project-state.json
+docs/CODE_CONTEXT_REPORT.md
+.ai-context/gitnexus-status.json
+.gstack/harness/agents/TEAM.md
+GSTACK_SKILL_REGISTRY.md
+WORKFLOW_RECIPES.md
+ORCHESTRATOR_RUNBOOK.md
+docs/PROBLEM_HANDLING_REPORT.md
+docs/SYSTEM_TUNING_REPORT.md
+```
+
+For code-bearing projects, do not trust `docs/CODE_CONTEXT_REPORT.md` alone. Compare:
+
+```text
+git rev-parse HEAD
+.gitnexus/meta.json lastCommit
+.ai-context/gitnexus-status.json last_commit
+```
+
+If `.gitnexus/meta.json` is current but `.ai-context/gitnexus-status.json` or `docs/CODE_CONTEXT_REPORT.md` points to an older commit, run:
+
+```bash
+node scripts/ai-context-bridge.mjs status
+```
+
+If `.gitnexus/meta.json` itself is stale and graph accuracy matters, run:
+
+```bash
+node scripts/ai-context-bridge.mjs refresh
+```
+
+### 2. Dispatch
+
+The Orchestrator selects exactly one primary agent and may attach supporting agents.
+
+Dispatch must include:
+
+```yaml
+run_id:
+user_intent:
+primary_agent:
+supporting_agents:
+recipe:
+reason:
+required_gates:
+allowed_writes:
+```
+
+Foundation readiness is a gate, not a suggestion. If readiness is `blocked`, do not enter a business recipe.
+
+### 3. Execute
+
+Agents execute only the skills and commands declared in their manifest, unless the Orchestrator explicitly expands scope in the dispatch.
+
+Before editing a function, class, or method in a GitNexus-indexed project, run upstream impact analysis for that symbol and record the result in the handoff.
+
+### 4. Evidence
+
+Evidence must be file-backed.
+
+Valid evidence examples:
+
+```text
+docs/*REPORT.md
+.ai-context/runs/<run-id>/
+.ai-context/gbrain-fallback/*.md
+.gstack/usage-runs/<run-id>.json
+test output logs
+browser screenshots
+review findings
+deployment/canary logs
+```
+
+Not valid evidence:
+
+```text
+"looks good"
+"should pass"
+"the agent said it worked"
+old test output from a previous run
+a gate status without command, exit code, and artifact
+```
+
+### 5. Merge
+
+Stage agents may write their own reports. They do not directly mark global gates passing.
+
+The Orchestrator merges evidence into:
+
+```text
+PROJECT_STATE.md
+.gstack/project-state.json
+docs/agents/<agent>.json
+```
+
+Gate updates must include:
+
+```yaml
+gate:
+  status:
+  command:
+  exit_code:
+  artifact:
+  checked_at:
+  commit:
+  skip_reason:
+```
+
+### 6. Memory
+
+Stable conclusions are synced to gbrain. Raw code graphs and full generated artifacts stay local.
+
+Preferred command:
+
+```bash
+node scripts/ai-context-bridge.mjs sync-gbrain
+```
+
+If gbrain is unavailable, the run must:
+
+1. write fallback artifacts under `.ai-context/gbrain-fallback/`;
+2. mark memory status as `fallback` or `blocked`;
+3. route the next step to Problem Handling or Foundation Remediation;
+4. record the fallback paths in the handoff.
+
+This failure mode must not be hidden as a generic warning.
+
+### 7. Usage
+
+Every real session writes a usage run.
+
+Start:
+
+```bash
+.gstack/harness/bin/gstack-harness-record-run \
+  --event session_start \
+  --status in_progress \
+  --agent "<Agent Name>" \
+  --skill "<skill-or-mcp-call>" \
+  --tool "<command-or-tool>" \
+  --recipe "<Recipe>" \
+  --intent "<Intent>"
+```
+
+End:
+
+```bash
+.gstack/harness/bin/gstack-harness-record-run \
+  --event session_end \
+  --status "<passed|failed|partial|blocked|skipped|fallback>" \
+  --agent "<Agent Name>" \
+  --agent "<Supporting Agent Name>" \
+  --skill "<skill-or-mcp-call>" \
+  --tool "<command-or-tool>" \
+  --recipe "<Recipe>" \
+  --artifact "<path>" \
+  --warning "<warning-id>" \
+  --blocker "<blocker-id>"
+```
+
+`--agent`, `--skill`, and `--tool` are repeatable. A run is not traceable if it only says
+"Review Agent" while the actual chain used GitNexus, bridge refresh, tests, readiness, and
+fallback writes. The usage run must preserve all three layers:
+
+```yaml
+agents_used:
+skills_used:
+tools_used:
+```
+
+The project state must keep the latest compact summary:
+
+```yaml
+usage:
+  latest_agents:
+  latest_skills:
+  latest_tools:
+```
+
+When a command fails after writing useful local evidence, status should reflect the gate impact. Example:
+
+```text
+sync-gbrain failed, fallback artifacts written, readiness blocked by gbrain_unavailable
+→ session_end status: blocked
+→ artifacts: .ai-context/gbrain-fallback/
+→ blocker: gbrain_unavailable
+```
+
+## Handoff Schema
+
+Every agent ends with this structure.
+
+```yaml
+agent_id:
+run_id:
+status:
+target_project:
+target_path:
+mode: read_only | writable
+summary:
+inputs_read:
+skills_or_tools_used:
+artifacts:
+quality_gate_updates:
+gitnexus:
+  status:
+  detect_changes:
+  impact:
+  detect_risk:
+  impact_risks:
+tests:
+  - command:
+    exit_code:
+    artifact:
+warnings:
+blockers:
+fallback_artifacts:
+next_recommended_agent:
+next_recommended_recipe:
+gbrain_write_candidates:
+system_tuning_notes:
+```
+
+The handoff is the contract between agents. If a later agent cannot act from the handoff without rereading the whole conversation, the handoff failed.
+
+## Rehearsal-Derived Rules
+
+Validated rehearsal runs produced these contract requirements:
+
+- Refresh bridge status before trusting local Code Context reports.
+- Treat gbrain fallback artifacts as evidence.
+- Treat gbrain-unavailable readiness as `blocked`, not `partial`.
+- Record `skills_or_tools_used`, not only high-level agent names.
+- Preserve both positive evidence (`npm test` passed) and blocking evidence (`sync-gbrain` fallback).
+- For review handoff, record test command, exit code, and artifact in the same Code Context bundle as GitNexus risk.
+- Distinguish global `detect_risk` from per-target `impact_risks`; dirty harness/state files can make global risk high while the business symbol impact is low.
+- GitNexus symbol context can be useful even when execution-flow participation is sparse in large legacy Python files.

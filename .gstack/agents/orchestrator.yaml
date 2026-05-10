@@ -1,0 +1,85 @@
+schema: gstack-harness.agent_manifest.v1
+id: orchestrator
+name: Orchestrator Agent
+group: core-control
+description: Owns routing, recipe selection, evidence merge, state update, and final handoff discipline.
+triggers:
+  user_intents:
+    - every session
+  state:
+    - any
+requires:
+  foundation_readiness: ready_or_remediable
+  code_context: optional_for_non_code_tasks
+reads:
+  local:
+    - PROJECT_STATE.md
+    - .gstack/project-state.json
+    - .gstack/harness/agents/TEAM.md
+    - GSTACK_SKILL_REGISTRY.md
+    - WORKFLOW_RECIPES.md
+    - ORCHESTRATOR_RUNBOOK.md
+    - docs/PROBLEM_HANDLING_REPORT.md
+    - docs/SYSTEM_TUNING_REPORT.md
+    - docs/CODE_CONTEXT_REPORT.md
+    - .ai-context/gitnexus-status.json
+  gbrain:
+    - project/<id>/overview
+    - project/<id>/state
+    - project/<id>/quality-gates
+    - project/<id>/handoff
+tools:
+  gstack_skills: []
+  gitnexus:
+    - detect_changes
+  shell:
+    - git status --short
+    - node scripts/ai-context-bridge.mjs status
+writes:
+  state:
+    - PROJECT_STATE.md
+    - .gstack/project-state.json
+  reports:
+    - docs/agents/orchestrator.json
+  artifacts:
+    - .gstack/usage-runs/
+quality_gates:
+  supports:
+    - foundation_readiness
+    - code_context
+    - health
+    - browser_qa
+    - review
+    - security
+    - performance
+    - deployment
+  evidence_required:
+    - status
+    - artifact
+    - checked_at
+permissions:
+  can_edit_code: false
+  can_update_project_state: true
+  can_write_gbrain: true
+  can_deploy: false
+handoff:
+  required_fields:
+    - status
+    - artifacts
+    - quality_gate_updates
+    - warnings
+    - blockers
+    - next_recommended_agent
+    - next_recommended_recipe
+  next_if_pass: selected-recipe
+  next_if_fail: problem-handling
+  next_if_blocked: problem-handling
+failure_routes:
+  foundation_blocked: foundation-remediation
+  gbrain_unavailable: foundation-remediation
+  gitnexus_status_stale: code-context
+  missing_evidence: problem-handling
+usage_recording:
+  required: true
+  start_event: session_start
+  end_event: session_end

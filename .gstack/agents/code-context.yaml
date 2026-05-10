@@ -1,0 +1,80 @@
+schema: gstack-harness.agent_manifest.v1
+id: code-context
+name: Code Context Agent
+group: project-defined
+description: Owns current code facts, GitNexus status, impact evidence, and code-context handoff material.
+triggers:
+  user_intents:
+    - "先看懂这个项目"
+    - "这个任务该改哪里"
+    - "这次 diff 影响什么"
+    - "准备 review"
+  state:
+    - code_context: missing
+    - code_context: stale
+    - gitnexus_status_commit_mismatch
+requires:
+  foundation_readiness: ready_or_remediable
+  git_repository: true
+reads:
+  local:
+    - .ai-context/project.json
+    - .ai-context/gitnexus-status.json
+    - .gitnexus/meta.json
+    - docs/CODE_CONTEXT_REPORT.md
+    - PROJECT_STATE.md
+    - .gstack/project-state.json
+tools:
+  gstack_skills: []
+  gitnexus:
+    - query
+    - context
+    - impact
+    - detect_changes
+  shell:
+    - node scripts/ai-context-bridge.mjs status
+    - node scripts/ai-context-bridge.mjs refresh
+    - node scripts/ai-context-bridge.mjs postchange --scope all
+    - node scripts/ai-context-bridge.mjs sync-gbrain
+writes:
+  reports:
+    - docs/CODE_CONTEXT_REPORT.md
+    - docs/agents/code-context.json
+  artifacts:
+    - .ai-context/gitnexus-status.json
+    - .ai-context/gitnexus-index.json
+    - .ai-context/gitnexus-index.md
+    - .ai-context/runs/
+    - .ai-context/gbrain-fallback/
+quality_gates:
+  supports:
+    - code_context
+  evidence_required:
+    - git_head
+    - indexed_commit
+    - stale
+    - artifact
+permissions:
+  can_edit_code: false
+  can_update_project_state: false
+  can_write_gbrain: true
+  can_deploy: false
+handoff:
+  required_fields:
+    - status
+    - artifacts
+    - gitnexus
+    - warnings
+    - blockers
+    - gbrain_write_candidates
+  next_if_pass: selected-delivery-agent
+  next_if_fail: problem-handling
+  next_if_blocked: foundation-remediation
+failure_routes:
+  gitnexus_index_stale: code-context
+  bridge_status_stale: code-context
+  gbrain_unavailable: foundation-remediation
+  gbrain_project_memory_sync_failed: foundation-remediation
+usage_recording:
+  required: true
+  must_record_tools_used: true

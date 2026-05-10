@@ -1,0 +1,73 @@
+schema: gstack-harness.agent_manifest.v1
+id: build
+name: Build Agent
+group: delivery
+description: Implements scoped code changes and local verification after Code Context has established impact.
+triggers:
+  user_intents:
+    - "实现这个"
+    - "修这个"
+    - "改代码"
+  state:
+    - implementation_plan: ready
+requires:
+  foundation_readiness: ready
+  code_context: ready
+  impact_analysis: required_for_symbol_edits
+reads:
+  local:
+    - PROJECT_STATE.md
+    - .gstack/project-state.json
+    - docs/CODE_CONTEXT_REPORT.md
+    - .ai-context/runs/
+    - package.json
+tools:
+  gstack_skills:
+    - health
+  gitnexus:
+    - impact
+    - detect_changes
+  shell:
+    - git status --short
+    - npm test
+writes:
+  source:
+    - scoped-by-task
+  artifacts:
+    - .ai-context/runs/
+    - test output logs
+  reports:
+    - docs/agents/build.json
+quality_gates:
+  supports:
+    - health
+    - code_context
+  evidence_required:
+    - command
+    - exit_code
+    - artifact
+    - changed_symbols
+permissions:
+  can_edit_code: true
+  can_update_project_state: false
+  can_write_gbrain: false
+  can_deploy: false
+handoff:
+  required_fields:
+    - status
+    - artifacts
+    - quality_gate_updates
+    - gitnexus
+    - warnings
+    - blockers
+  next_if_pass: review
+  next_if_fail: build
+  next_if_blocked: problem-handling
+failure_routes:
+  impact_missing: code-context
+  tests_failed: build
+  gbrain_unavailable: problem-handling
+  unexpected_dirty_worktree: problem-handling
+usage_recording:
+  required: true
+  must_record_tools_used: true

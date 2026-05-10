@@ -1,0 +1,71 @@
+schema: gstack-harness.agent_manifest.v1
+id: review
+name: Review Agent
+group: delivery
+description: Reviews diffs, GitNexus impact evidence, and verification artifacts before release or merge.
+triggers:
+  user_intents:
+    - "review"
+    - "看看代码有没有问题"
+    - "准备 merge"
+    - "准备上线"
+  state:
+    - diff_present
+    - release_requested
+requires:
+  foundation_readiness: ready
+  code_context: ready
+  diff_evidence: required
+reads:
+  local:
+    - PROJECT_STATE.md
+    - .gstack/project-state.json
+    - docs/CODE_CONTEXT_REPORT.md
+    - .ai-context/runs/
+    - test output logs
+tools:
+  gstack_skills:
+    - review
+  gitnexus:
+    - detect_changes
+    - impact
+  shell:
+    - git status --short
+writes:
+  reports:
+    - docs/REVIEW_REPORT.md
+    - docs/agents/review.json
+  artifacts:
+    - .gstack/usage-runs/
+quality_gates:
+  supports:
+    - review
+  evidence_required:
+    - findings
+    - changed_symbols
+    - affected_processes
+    - artifact
+permissions:
+  can_edit_code: false
+  can_update_project_state: false
+  can_write_gbrain: false
+  can_deploy: false
+handoff:
+  required_fields:
+    - status
+    - artifacts
+    - quality_gate_updates
+    - findings
+    - warnings
+    - blockers
+  next_if_pass: release
+  next_if_fail: build
+  next_if_blocked: problem-handling
+failure_routes:
+  missing_diff_evidence: code-context
+  missing_test_evidence: reality-test
+  high_risk_impact: architecture
+  gbrain_unavailable: problem-handling
+usage_recording:
+  required: true
+  must_record_tools_used: true

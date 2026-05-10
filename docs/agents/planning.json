@@ -1,0 +1,13 @@
+{
+  "schema": "gstack-harness.agent_status.v1",
+  "generated_at": "2026-05-10T08:12:10.250Z",
+  "event": "foundation_readiness",
+  "project_id": "gstack-multiagent",
+  "agent": "planning",
+  "name": "Planning Agent",
+  "status": "not_run",
+  "evidence": [],
+  "blockers": [],
+  "warnings": [],
+  "next_action": "create implementation plan for non-trivial changes"
+}
