@@ -8,6 +8,8 @@
 - Design a future `pggg bootstrap` or `pggg --install-deps` flow for user-approved gstack/gbrain setup.
 - Expand CI coverage with shell linting when `shellcheck` is available.
 - Add focused examples for onboarding a target project, syncing gbrain memory, and running post-change impact checks.
+- Bound install-time gbrain sync so protocol/state rendering can finish cleanly and sync timeout is reported as structured warning evidence.
+- Split usage recorder output into per-event signals and historical project context so single-run tuning evidence stays clean while long-term gaps remain visible.
 
 ## Later
 
