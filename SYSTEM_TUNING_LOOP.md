@@ -258,6 +258,71 @@ success_metric: every Windows-only release claim has Windows Test Host evidence
 priority: high
 ```
 
+## 重复工作升级协议
+
+重复工作不是聊天偏好。它是系统证据。
+
+状态：
+
+```text
+discovery -> reuse_required -> promotion_candidate -> approved_protocol
+```
+
+判定：
+
+- 第一次出现：完成任务，记录样本、格式、字段、artifact、用户纠正。
+- 第二次出现：必须先复用已知偏好，再询问缺失信息。
+- 第三到第十次稳定出现：生成 promotion candidate。
+- 第二次仍要求用户重复同一偏好：记为 system tuning failure。
+
+常见触发信号：
+
+```text
+按上次
+还是那个格式
+以后都这样
+每天 / 每周 / 每月
+别再问这个
+同样流程再跑一遍
+```
+
+升级顺序：
+
+```text
+handoff rule -> workflow recipe -> agent capability -> scheduled candidate -> capability gap -> possible new skill
+```
+
+promotion candidate 模板：
+
+```yaml
+pattern_id:
+observed_in:
+repeat_count:
+known_inputs:
+known_outputs:
+user_preferences:
+current_workaround:
+promotion_type: handoff_rule | workflow_recipe | agent_capability | scheduled_candidate | capability_gap | possible_skill
+recommended_change:
+required_evidence:
+risk:
+approval_required:
+```
+
+system tuning failure 包括：
+
+```text
+第二次仍要求用户重复同一格式、字段、流程或周期
+忽略上一轮用户纠正
+完成重复任务但没有记录可复用 pattern
+未获批准就启用周期性执行
+能用 recipe / handoff rule 解决却直接新建 skill
+```
+
+定时约束：
+
+只有 cadence、permissions、input source、output artifact、failure handling、monitoring path 和 user approval 都明确时，scheduled candidate 才能升级为 active recurrence。
+
 ## 调教 Agent 的职责
 
 调教 Agent 不是“改 gstack skill 的 Agent”。它是系统教练和能力架构师。

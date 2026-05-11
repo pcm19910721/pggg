@@ -1290,6 +1290,100 @@ Notes: target OS, runner, evidence path
 如果 runner 返回不可复现结论，补 evidence_required 和 artifact retention。
 ```
 
+## R17: Repeat Work Promotion / Automation Candidate
+
+适用：
+
+```text
+用户说“按上次”“还是那个格式”“以后都这样”
+同类任务第二次或多次出现
+用户重复纠正同一字段、格式、流程或交接偏好
+任务出现明确周期：每天、每周、每月、每个发布前
+usage runs / tuning notes 显示同一 where_stalled、user_correction 或 capability_gap 反复出现
+```
+
+核心原则：
+
+```text
+先完成当前任务，再升级系统。
+第二次必须复用已知偏好，不能默认重新问。
+定时任务先成为 scheduled candidate，不自动启用。
+能用 handoff rule / workflow recipe / agent capability 解决，就不新建 skill。
+```
+
+流程：
+
+```text
+按原本业务 recipe 完成当前任务
+→ 检查 .gstack/usage-runs/index.jsonl 和相关 run JSON
+→ 检查 docs/USAGE_FEEDBACK_REPORT.md、docs/SYSTEM_TUNING_REPORT.md
+→ 查询 gbrain project / agent memory（可用时）
+→ 判断重复阶段：discovery / reuse_required / promotion_candidate / approved_protocol
+→ 复用已知格式、字段、路径、交接对象、skip policy 和质量门禁
+→ 如果缺失历史 pattern，记录 memory miss
+→ 如果重复已稳定，写 promotion candidate
+→ 更新 PROJECT_STATE.md / .gstack/project-state.json 的 repeat_work 区域
+→ 必要时更新 SYSTEM_TUNING_LOOP.md、WORKFLOW_RECIPES.md 或 handoff contract
+→ 把长期稳定结论写入 gbrain
+```
+
+promotion candidate schema：
+
+```yaml
+pattern_id:
+observed_in:
+repeat_count:
+known_inputs:
+known_outputs:
+user_preferences:
+current_workaround:
+promotion_type: handoff_rule | workflow_recipe | agent_capability | scheduled_candidate | capability_gap | possible_skill
+recommended_change:
+required_evidence:
+risk:
+approval_required:
+```
+
+scheduled candidate 必填：
+
+```yaml
+cadence:
+permission_scope:
+input_source:
+output_artifact:
+failure_handling:
+monitoring_path:
+approval_required: true
+approved_by:
+```
+
+产物：
+
+```text
+当前任务 artifact
+repeat work promotion note
+memory miss note（如有）
+scheduled candidate（如适用）
+system tuning failure（如适用）
+updated project state repeat_work fields
+```
+
+状态：
+
+```text
+Phase: maintenance 或当前业务阶段
+System Tuning: monitoring / promotion_candidate / blocked
+Repeat Work: discovery / reuse_required / promotion_candidate / approved_protocol
+```
+
+调教钩子：
+
+```text
+如果第二次还要求用户重复同一偏好，记录 system tuning failure。
+如果 scheduled candidate 缺 cadence、权限、输出、失败处理或监控路径，不能升级为 active recurrence。
+如果 Agent 想新建 skill，先证明 recipe、handoff rule、agent capability 都不足。
+```
+
 ## Quality Gate Matrix
 
 | Gate | Required For | Supported By | Evidence Required |

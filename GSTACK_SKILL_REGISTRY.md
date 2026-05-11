@@ -20,6 +20,18 @@
 4. 所有 passing/failing/skipped 都要有证据，不能只写结论。
 5. 调教 Agent 优化的是项目级多 Agent 系统：Agent 能力规划、协作关系、路由、交接和评估，不重写已验证 skill。
 
+## Repeat Work Boundary
+
+重复工作不自动等于新建 gstack skill。
+
+优先升级顺序：
+
+```text
+handoff rule -> workflow recipe -> agent capability -> scheduled candidate -> capability gap -> possible new skill
+```
+
+只有当重复 pattern 稳定、跨项目可复用、边界清晰，并且不能通过项目级 recipe、handoff 或 Agent 能力表达时，才建议创建或修改 skill。
+
 ## Foundation Agents
 
 Foundation agents 不是新的 gstack skill。它们是项目级 harness agent，用来检查和补齐 gbrain/gstack/项目协议/runtime/runner 的基础状态。

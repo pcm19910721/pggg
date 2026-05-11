@@ -129,6 +129,10 @@ test output logs
 browser screenshots
 review findings
 deployment/canary logs
+repeated preference evidence
+memory miss notes
+repeat-work promotion candidates
+scheduled candidates awaiting approval
 ```
 
 Not valid evidence:

@@ -116,6 +116,13 @@
 
 - YYYY-MM-DD: ...
 
+## Repeat Work Promotion
+
+- Known patterns:
+- Promotion backlog:
+- Scheduled candidates:
+- Recent memory misses:
+
 ## Notes
 
 - ...
@@ -218,6 +225,12 @@
       "artifact": "",
       "skip_reason": ""
     }
+  },
+  "repeat_work": {
+    "known_patterns": [],
+    "promotion_backlog": [],
+    "scheduled_candidates": [],
+    "recent_memory_misses": []
   },
   "blockers": [],
   "next_recommended_action": {

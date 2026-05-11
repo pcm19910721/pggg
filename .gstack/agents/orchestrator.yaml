@@ -21,6 +21,8 @@ reads:
     - ORCHESTRATOR_RUNBOOK.md
     - docs/PROBLEM_HANDLING_REPORT.md
     - docs/SYSTEM_TUNING_REPORT.md
+    - docs/USAGE_FEEDBACK_REPORT.md
+    - .gstack/usage-runs/index.jsonl
     - docs/CODE_CONTEXT_REPORT.md
     - .ai-context/gitnexus-status.json
   gbrain:
@@ -43,6 +45,7 @@ writes:
     - docs/agents/orchestrator.json
   artifacts:
     - .gstack/usage-runs/
+    - repeat-work promotion notes
 quality_gates:
   supports:
     - foundation_readiness

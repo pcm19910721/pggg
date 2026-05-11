@@ -41,3 +41,11 @@ This project is indexed by GitNexus as **gstack-multiagent** (838 symbols, 1362 
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## Repeat Work Promotion
+
+- Treat repeated user instructions as system evidence, not chat trivia.
+- First occurrence is discovery; second occurrence must reuse known preferences before asking again.
+- If the user has to repeat the same format, field list, workflow, or schedule twice, record it as a system tuning failure.
+- Promote stable repeated work in this order: handoff rule, workflow recipe, agent capability, scheduled candidate, capability gap, possible new skill.
+- Do not silently enable recurring work. Create a scheduled candidate until cadence, permissions, outputs, failure handling, monitoring, and user approval are explicit.

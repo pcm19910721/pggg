@@ -1279,6 +1279,13 @@ $WARNING_TEXT
 
 - $DATE: pggg installed harness protocol. Verdict: $FOUNDATION_VERDICT.
 
+## Repeat Work Promotion
+
+- Known patterns:
+- Promotion backlog:
+- Scheduled candidates:
+- Recent memory misses:
+
 ## Notes
 
 - Installed from template source: $TEMPLATE_ROOT
@@ -1651,6 +1658,12 @@ PROJECT_STATE_JSON="$(cat <<EOF
   },
   "problem_handling": $EXISTING_PROBLEM_HANDLING_JSON,
   "system_tuning": $EXISTING_SYSTEM_TUNING_JSON,
+  "repeat_work": {
+    "known_patterns": [],
+    "promotion_backlog": [],
+    "scheduled_candidates": [],
+    "recent_memory_misses": []
+  },
   "blockers": $(json_array "${BLOCKERS[@]}"),
   "warnings": $(json_array "${WARNINGS[@]}"),
   "problem_handling_required": $([ "$PROBLEM_HANDLING_REQUIRED" -eq 1 ] && printf 'true' || printf 'false'),
@@ -1735,6 +1748,10 @@ for (const [key, value] of Object.entries(generated.runtime || {})) {
   if (value !== undefined && value !== null && value !== '') runtime[key] = value;
 }
 next.runtime = runtime;
+next.repeat_work = {
+  ...(generated.repeat_work || {}),
+  ...(enrichedExisting.repeat_work || {}),
+};
 next.phase = enrichedExisting.phase || generated.phase;
 next.goal = enrichedExisting.goal || generated.goal;
 next.last_completed_agent = enrichedExisting.last_completed_agent || generated.last_completed_agent;
