@@ -12,6 +12,7 @@ Thumbs.db
 # Runtime and generated artifacts
 .gitnexus/
 .claude/skills/generated/
+.ai-context/change-baseline.json
 .ai-context/runs/
 .ai-context/gbrain-fallback/
 .ai-context/gitnexus-status.json

@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 
 const ROOT = process.cwd();
 const CONFIG_PATH = path.join(ROOT, '.ai-context', 'project.json');
+const CHANGE_BASELINE_PATH = path.join(ROOT, '.ai-context', 'change-baseline.json');
 const START = '<!-- project-context-bridge:start -->';
 const END = '<!-- project-context-bridge:end -->';
 const DEFAULT_SYNC_GBRAIN_KEYS = [
@@ -133,6 +134,54 @@ function getStatus(repoPath) {
   return result.ok ? result.stdout.trim() : '';
 }
 
+function getStagedFiles(repoPath) {
+  const result = git(['diff', '--cached', '--name-only'], repoPath);
+  return result.ok ? result.stdout.split(/\r?\n/).filter(Boolean).sort() : [];
+}
+
+function statusEntries(status) {
+  return String(status || '')
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter(Boolean);
+}
+
+function statusPath(line) {
+  const text = String(line || '').trimEnd();
+  const rename = text.match(/^.. (.+) -> (.+)$/);
+  if (rename) return rename[2];
+  return text.slice(3).trim();
+}
+
+function statusPaths(status) {
+  return statusEntries(status).map(statusPath).filter(Boolean).sort();
+}
+
+function isHarnessSessionArtifact(filePath) {
+  return filePath === '.ai-context/change-baseline.json'
+    || filePath.startsWith('.ai-context/runs/')
+    || filePath === '.gitnexus/'
+    || filePath.startsWith('.gitnexus/');
+}
+
+function sessionRelevantStatusPaths(status) {
+  return statusPaths(status).filter((filePath) => !isHarnessSessionArtifact(filePath));
+}
+
+function diffStatusPaths(beforeStatus, afterStatus) {
+  const before = new Set(sessionRelevantStatusPaths(beforeStatus));
+  return sessionRelevantStatusPaths(afterStatus).filter((item) => !before.has(item));
+}
+
+function preexistingStatusPaths(beforeStatus, afterStatus) {
+  const after = new Set(sessionRelevantStatusPaths(afterStatus));
+  return sessionRelevantStatusPaths(beforeStatus).filter((item) => after.has(item));
+}
+
+async function readChangeBaseline() {
+  return readJson(CHANGE_BASELINE_PATH, null);
+}
+
 async function exists(filePath) {
   try {
     await fs.access(filePath);
@@ -236,8 +285,9 @@ Before code work:
 2. Read the gbrain pages listed under \`gbrain.pages\` when available.
 3. Run \`node scripts/ai-context-bridge.mjs status\`.
 4. Refresh GitNexus when stale and graph accuracy matters: \`node scripts/ai-context-bridge.mjs refresh\`.
-5. Preview durable memory writes before handoff: \`node scripts/ai-context-bridge.mjs sync-gbrain --dry-run\`.
-6. Sync durable project memory after readiness, refresh, or handoff changes: \`node scripts/ai-context-bridge.mjs sync-gbrain\`.
+5. At session start, run \`node scripts/ai-context-bridge.mjs baseline\` before edits so preexisting dirty worktree state is separated from this session.
+6. Preview durable memory writes before handoff: \`node scripts/ai-context-bridge.mjs sync-gbrain --dry-run\`.
+7. Sync durable project memory after readiness, refresh, or handoff changes: \`node scripts/ai-context-bridge.mjs sync-gbrain\`.
 
 Use GitNexus for current code facts: source symbols, calls, imports, execution flows, context, impact, and detect-changes.
 Use gbrain for durable memory: decisions, state, assumptions, quality gates, hotspots, and handoff notes.
@@ -248,12 +298,21 @@ If the user only says "接管", "继续", "恢复现场", or "继续项目", rea
 
 Never import the full source tree, \`.gitnexus/\`, or \`.understand-anything/\` into gbrain. Store concise summaries and pointers only.
 
-Before finishing code work, run:
+Before finishing code work, run the session report:
 
 \`\`\`bash
 node scripts/ai-context-bridge.mjs postchange --scope all
 node scripts/ai-context-bridge.mjs sync-gbrain
 \`\`\`
+
+Before committing, stage only the files owned by this session and run the commit gate:
+
+\`\`\`bash
+git add <owned-files>
+node scripts/ai-context-bridge.mjs postchange --scope staged
+\`\`\`
+
+Treat whole-worktree GitNexus risk as raw evidence. The commit gate is the staged report; preexisting dirty files should be warnings, not blockers for unrelated work.
 
 For high-risk edits, add explicit impact targets:
 
@@ -573,6 +632,14 @@ code_context:
   run_id: ${yamlValue(details.run_id || '')}
   risk: ${yamlValue(details.risk || '')}
   detect_risk: ${yamlValue(details.detect_risk || '')}
+  raw_detect_risk: ${yamlValue(details.raw_detect_risk || details.detect_risk || '')}
+  harness_scope_risk: ${yamlValue(details.harness_scope_risk || '')}
+  risk_source: ${yamlValue(details.risk_source || '')}
+  commit_gate: ${yamlValue(details.commit_gate || '')}
+  preexisting_dirty_worktree: ${yamlValue(details.preexisting_dirty_worktree === undefined ? '' : String(details.preexisting_dirty_worktree))}
+  session_changed_files: ${JSON.stringify(details.session_changed_files || [])}
+  preexisting_dirty_files: ${JSON.stringify(details.preexisting_dirty_files || [])}
+  warnings: ${JSON.stringify(details.warnings || [])}
   impact_risks: ${JSON.stringify(details.impact_risks || [])}
   detect_changes_ok: ${yamlValue(details.detect_changes_ok === undefined ? '' : String(details.detect_changes_ok))}
   impact_targets: ${JSON.stringify(details.impact_targets || [])}
@@ -1432,7 +1499,8 @@ ${markdown}
 
 function extractRisk(text) {
   const match = text.match(/risk[_ ]level["':\s]+([a-zA-Z]+)/i) || text.match(/\brisk["':\s]+([a-zA-Z]+)/i);
-  return match ? match[1].toLowerCase() : 'unknown';
+  const risk = match ? match[1].toLowerCase() : 'unknown';
+  return ['critical', 'high', 'medium', 'low', 'none'].includes(risk) ? risk : 'unknown';
 }
 
 function arrayArg(value) {
@@ -1479,6 +1547,71 @@ function markdownTestEvidence(tests) {
   ].join('\n')).join('\n\n');
 }
 
+function sessionRiskFromDelta(scope, detectRisk, sessionChangedFiles, preexistingDirtyFiles, baseline) {
+  if (scope === 'staged') {
+    return {
+      risk: detectRisk,
+      source: 'staged_detect_changes',
+      commit_gate: ['critical', 'high'].includes(detectRisk)
+        ? 'blocked'
+        : (detectRisk === 'unknown' ? 'needs_review' : 'pass'),
+      warnings: detectRisk === 'unknown' ? ['staged_detect_risk_unknown'] : [],
+    };
+  }
+
+  if (!baseline) {
+    return {
+      risk: detectRisk,
+      source: 'raw_detect_changes_no_baseline',
+      commit_gate: 'not_applicable',
+      warnings: ['change_baseline_missing'],
+    };
+  }
+
+  const warnings = [];
+  if (preexistingDirtyFiles.length) warnings.push('preexisting_dirty_worktree');
+  if (['critical', 'high'].includes(detectRisk) && preexistingDirtyFiles.length) {
+    warnings.push('gitnexus_high_due_preexisting_dirty_worktree');
+  }
+  if (['critical', 'high'].includes(detectRisk)) {
+    warnings.push('raw_detect_high_requires_review');
+    return {
+      risk: 'needs_review',
+      source: 'session_baseline_delta_raw_high',
+      commit_gate: 'not_applicable',
+      warnings,
+    };
+  }
+
+  return {
+    risk: sessionChangedFiles.length ? 'low' : 'none',
+    source: 'session_baseline_delta',
+    commit_gate: 'not_applicable',
+    warnings,
+  };
+}
+
+async function commandBaseline() {
+  const config = await loadConfig();
+  if (!isGitRepo(config.repo_path)) {
+    throw new Error(`repo_path is not a git repository: ${config.repo_path}`);
+  }
+
+  const status = getStatus(config.repo_path);
+  const baseline = {
+    schema: 'gstack-harness.change_baseline.v1',
+    project_id: config.project_id,
+    repo_path: config.repo_path,
+    branch: getBranch(config.repo_path),
+    head: getHead(config.repo_path),
+    status,
+    dirty_files: statusPaths(status),
+    generated_at: new Date().toISOString(),
+  };
+  await writeJson(CHANGE_BASELINE_PATH, baseline);
+  console.log(JSON.stringify(baseline, null, 2));
+}
+
 async function commandPostchange(args) {
   const config = await loadConfig();
   if (!isGitRepo(config.repo_path)) {
@@ -1493,6 +1626,11 @@ async function commandPostchange(args) {
   const before = getHead(config.repo_path);
   const branch = getBranch(config.repo_path);
   const status = getStatus(config.repo_path);
+  const baseline = await readChangeBaseline();
+  const sessionChangedFiles = scope === 'staged'
+    ? getStagedFiles(config.repo_path).filter((filePath) => !isHarnessSessionArtifact(filePath))
+    : (baseline ? diffStatusPaths(baseline.status, status) : statusPaths(status));
+  const preexistingDirtyFiles = baseline ? preexistingStatusPaths(baseline.status, status) : [];
 
   const detectArgs = ['detect-changes', '--scope', scope, '--repo', config.gitnexus.repo];
   if (scope === 'compare' && args.baseRef) detectArgs.push('--base-ref', args.baseRef);
@@ -1520,8 +1658,9 @@ async function commandPostchange(args) {
   }
 
   const detectRisk = extractRisk(detectText);
+  const sessionRisk = sessionRiskFromDelta(scope, detectRisk, sessionChangedFiles, preexistingDirtyFiles, baseline);
   const impactRisks = impacts.map((impact) => ({ target: impact.target, risk: impact.risk }));
-  const risk = impacts.find((impact) => ['critical', 'high'].includes(impact.risk))?.risk || detectRisk;
+  const risk = impacts.find((impact) => ['critical', 'high'].includes(impact.risk))?.risk || sessionRisk.risk;
   const note = `---
 type: impact_analysis
 project: ${config.project_id}
@@ -1534,6 +1673,10 @@ commit_before: ${before || ''}
 commit_after: working-tree
 scope: ${scope}
 risk_level: ${risk}
+raw_detect_risk: ${detectRisk}
+harness_scope_risk: ${sessionRisk.risk}
+risk_source: ${sessionRisk.source}
+commit_gate: ${sessionRisk.commit_gate}
 changed_files:
 changed_symbols:
 affected_processes:
@@ -1548,7 +1691,13 @@ generated_at: ${new Date().toISOString()}
 - Branch: ${branch}
 - Scope: ${scope}
 - Risk: ${risk}
+- Raw detect risk: ${detectRisk}
+- Harness scope risk: ${sessionRisk.risk}
+- Risk source: ${sessionRisk.source}
+- Commit gate: ${sessionRisk.commit_gate}
 - Working tree: ${status ? 'dirty' : 'clean'}
+- Session changed files: ${sessionChangedFiles.length}
+- Preexisting dirty files: ${preexistingDirtyFiles.length}
 
 ## GitNexus detect-changes
 
@@ -1587,6 +1736,17 @@ ${markdownTestEvidence(tests)}
     working_tree_status: status ? 'dirty' : 'clean',
     detect_changes_ok: detect.ok,
     detect_risk: detectRisk,
+    raw_detect_risk: detectRisk,
+    harness_scope_risk: sessionRisk.risk,
+    risk,
+    risk_source: sessionRisk.source,
+    commit_gate: sessionRisk.commit_gate,
+    baseline_path: baseline ? '.ai-context/change-baseline.json' : null,
+    baseline_head: baseline?.head || null,
+    preexisting_dirty_worktree: preexistingDirtyFiles.length > 0,
+    session_changed_files: sessionChangedFiles,
+    preexisting_dirty_files: preexistingDirtyFiles,
+    warnings: sessionRisk.warnings,
     impact_risks: impactRisks,
     impact_targets: impacts,
     tests,
@@ -1601,6 +1761,14 @@ ${markdownTestEvidence(tests)}
     run_id: id,
     detect_changes_ok: detect.ok,
     detect_risk: detectRisk,
+    raw_detect_risk: detectRisk,
+    harness_scope_risk: sessionRisk.risk,
+    risk_source: sessionRisk.source,
+    commit_gate: sessionRisk.commit_gate,
+    preexisting_dirty_worktree: preexistingDirtyFiles.length > 0,
+    session_changed_files: sessionChangedFiles,
+    preexisting_dirty_files: preexistingDirtyFiles,
+    warnings: sessionRisk.warnings,
     impact_risks: impactRisks,
     impact_targets: impacts.map((impact) => impact.target),
     tests,
@@ -1626,6 +1794,7 @@ function usage() {
   console.log(`Usage:
   node scripts/ai-context-bridge.mjs init [--project-id id] [--repo path] [--gitnexus-repo name] [--base-branch main]
   node scripts/ai-context-bridge.mjs status
+  node scripts/ai-context-bridge.mjs baseline
   node scripts/ai-context-bridge.mjs refresh [--skip-analyze] [--no-embeddings] [--write-gbrain]
   node scripts/ai-context-bridge.mjs sync-gbrain [--dry-run] [--page overview|state|foundation_readiness|code_context|quality_gates|gitnexus_index|architecture|hotspots|handoff|decisions|assumptions|all]
   node scripts/ai-context-bridge.mjs repair-gbrain [--dry-run] [--page key|slug|all]
@@ -1643,6 +1812,9 @@ async function main() {
         break;
       case 'status':
         await commandStatus(args);
+        break;
+      case 'baseline':
+        await commandBaseline(args);
         break;
       case 'refresh':
         await commandRefresh(args);

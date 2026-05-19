@@ -180,9 +180,10 @@ case "${1:-}" in
     printf '1.6.3-test\n'
     ;;
   detect-changes)
+    risk="${GITNEXUS_DETECT_RISK:-low}"
     printf 'Changes: 1 files, 1 symbols\n'
     printf 'Affected processes: 0\n'
-    printf 'Risk level: low\n'
+    printf 'Risk level: %s\n' "$risk"
     printf '\nChanged symbols:\n'
     printf '  Function demo → demo.js\n'
     ;;
@@ -445,15 +446,23 @@ test_readiness_invariants() {
   assert_json_field "$indexed_dir/.gstack/project-state.json" "state.runtime.test === 'npm test'" "package test script was not detected without jq"
   assert_json_field "$indexed_dir/.gstack/project-state.json" "state.runtime.dev === 'npm run dev'" "package dev script was not detected without jq"
   assert_contains "$indexed_dir/docs/CODE_CONTEXT_REPORT.md" "Status: ready"
+  printf '%s\n' "preexisting dirty" > "$indexed_dir/preexisting-dirty.txt"
+  (cd "$indexed_dir" && PATH="$FAKE_BIN:$PATH" node scripts/ai-context-bridge.mjs baseline > "$TMP_ROOT/change-baseline.out")
+  printf '%s\n' "session change" > "$indexed_dir/session-change.txt"
+  (cd "$indexed_dir" && GITNEXUS_DETECT_RISK=high PATH="$FAKE_BIN:$PATH" node scripts/ai-context-bridge.mjs postchange --scope all --run-id test-postchange-raw-high > "$TMP_ROOT/postchange-raw-high.out")
+  assert_json_field "$indexed_dir/.ai-context/runs/test-postchange-raw-high/run.json" "state.detect_risk === 'high' && state.harness_scope_risk === 'needs_review' && state.risk_source === 'session_baseline_delta_raw_high'" "postchange incorrectly downgraded raw high all-scope risk"
   (cd "$indexed_dir" && PATH="$FAKE_BIN:$PATH" node scripts/ai-context-bridge.mjs postchange --scope all --run-id test-postchange --test-command "npm test" --test-exit-code 0 --test-artifact "docs/test-output.log" > "$TMP_ROOT/postchange-test-evidence.out")
   assert_contains "$indexed_dir/.ai-context/runs/test-postchange/gbrain-note.md" "npm test"
   assert_contains "$indexed_dir/.ai-context/runs/test-postchange/gbrain-note.md" "docs/test-output.log"
   assert_json_field "$indexed_dir/.ai-context/runs/test-postchange/run.json" "state.tests && state.tests[0].command === 'npm test' && state.tests[0].exit_code === 0 && state.tests[0].artifact === 'docs/test-output.log'" "postchange did not preserve test evidence in run JSON"
+  assert_json_field "$indexed_dir/.ai-context/runs/test-postchange/run.json" "state.harness_scope_risk === 'low' && state.risk_source === 'session_baseline_delta' && state.session_changed_files.includes('session-change.txt') && state.preexisting_dirty_files.includes('preexisting-dirty.txt')" "postchange did not preserve baseline session delta"
   assert_contains "$indexed_dir/docs/CODE_CONTEXT_REPORT.md" "test_evidence:"
   (cd "$indexed_dir" && PATH="$FAKE_BIN:$PATH" node scripts/ai-context-bridge.mjs postchange --scope all --run-id test-postchange-impact --impact demo --test-command "npm test" --test-exit-code 0 --test-artifact "docs/test-output.log" > "$TMP_ROOT/postchange-impact-risk.out")
   assert_contains "$indexed_dir/docs/CODE_CONTEXT_REPORT.md" "detect_risk: low"
   assert_contains "$indexed_dir/docs/CODE_CONTEXT_REPORT.md" 'impact_risks: [{"target":"demo","risk":"low"}]'
   assert_json_field "$indexed_dir/.ai-context/runs/test-postchange-impact/run.json" "state.detect_risk === 'low' && state.impact_risks && state.impact_risks[0].target === 'demo' && state.impact_risks[0].risk === 'low'" "postchange did not distinguish detect risk from target impact risk"
+  (cd "$indexed_dir" && git add session-change.txt && PATH="$FAKE_BIN:$PATH" node scripts/ai-context-bridge.mjs postchange --scope staged --run-id test-staged-gate > "$TMP_ROOT/postchange-staged-gate.out")
+  assert_json_field "$indexed_dir/.ai-context/runs/test-staged-gate/run.json" "state.commit_gate === 'pass' && state.risk_source === 'staged_detect_changes' && state.harness_scope_risk === 'low'" "staged postchange did not produce commit gate"
 
   local empty_gbrain_dir="$TMP_ROOT/empty-gbrain"
   local empty_fake_bin="$TMP_ROOT/empty-fake-bin"
