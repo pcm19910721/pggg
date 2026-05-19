@@ -1448,6 +1448,7 @@ Status: missing
       provider: gitnexus
       primary_commands:
         - node scripts/ai-context-bridge.mjs status
+        - node scripts/ai-context-bridge.mjs memory-check
         - node scripts/ai-context-bridge.mjs baseline
         - node scripts/ai-context-bridge.mjs refresh
         - node scripts/ai-context-bridge.mjs sync-gbrain --dry-run
@@ -1876,7 +1877,7 @@ CODEX_START_PROMPT="$(cat <<EOF
 6. 读取 .ai-context/project.json 和 docs/CODE_CONTEXT_REPORT.md；docs/CODEBASE_MAP_REPORT.md 只是旧名兼容指针。
 7. 读取 HARNESS_PRODUCT_USAGE.md、GSTACK_SKILL_REGISTRY.md、WORKFLOW_RECIPES.md、ORCHESTRATOR_RUNBOOK.md。
 8. 如果 gbrain 可用，轻量读取 project/$PROJECT_ID/state 和 project/$PROJECT_ID/handoff；只检查 overview、foundation-readiness、code-context、quality-gates、gitnexus-index、architecture、hotspots 是否缺失或 stale，不要展开大段内容。需要刷新时只报告建议，除非用户要求，不要自动 sync。
-9. 代码理解、产品判断、实现、review 或 incident 定位前，优先使用 Code Context Agent 的 GitNexus 流程：先跑 node scripts/ai-context-bridge.mjs status；如 stale 且依赖图谱准确，再 refresh；形成稳定摘要后跑 sync-gbrain。接管阶段只检查 stale，不展开完整图谱。UA 只作为 dashboard/onboarding/domain/fallback 增强。
+9. 代码理解、产品判断、实现、review 或 incident 定位前，优先使用 Code Context Agent 的 GitNexus 流程：先跑 node scripts/ai-context-bridge.mjs status 和 node scripts/ai-context-bridge.mjs memory-check；如 stale 且依赖图谱准确，再 refresh；形成稳定摘要后跑 sync-gbrain。接管阶段只检查 stale，不展开完整图谱。UA 只作为 dashboard/onboarding/domain/fallback 增强。
 10. 如果 gbrain query 遇到 PGLite lock 或 timeout，重试一次，仍失败就派发 Problem Handling Agent。
 11. 不要重写 gstack skill 本体。
 12. Foundation Readiness 如果是 unknown/stale，先跑 .gstack/harness/bin/gstack-harness-readiness --target "$TARGET_DIR"。如果是 partial/blocked，先跑 .gstack/harness/bin/gstack-harness-remediate --target "$TARGET_DIR"，再回到 readiness 复检。

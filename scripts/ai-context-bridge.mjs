@@ -284,10 +284,11 @@ Before code work:
 1. Read \`.ai-context/project.json\`.
 2. Read the gbrain pages listed under \`gbrain.pages\` when available.
 3. Run \`node scripts/ai-context-bridge.mjs status\`.
-4. Refresh GitNexus when stale and graph accuracy matters: \`node scripts/ai-context-bridge.mjs refresh\`.
-5. At session start, run \`node scripts/ai-context-bridge.mjs baseline\` before edits so preexisting dirty worktree state is separated from this session.
-6. Preview durable memory writes before handoff: \`node scripts/ai-context-bridge.mjs sync-gbrain --dry-run\`.
-7. Sync durable project memory after readiness, refresh, or handoff changes: \`node scripts/ai-context-bridge.mjs sync-gbrain\`.
+4. Run \`node scripts/ai-context-bridge.mjs memory-check\` to compare GitNexus, gbrain project memory, and local artifacts before trusting handoff state.
+5. Refresh GitNexus when stale and graph accuracy matters: \`node scripts/ai-context-bridge.mjs refresh\`.
+6. At session start, run \`node scripts/ai-context-bridge.mjs baseline\` before edits so preexisting dirty worktree state is separated from this session.
+7. Preview durable memory writes before handoff: \`node scripts/ai-context-bridge.mjs sync-gbrain --dry-run\`.
+8. Sync durable project memory after readiness, refresh, or handoff changes: \`node scripts/ai-context-bridge.mjs sync-gbrain\`.
 
 Use GitNexus for current code facts: source symbols, calls, imports, execution flows, context, impact, and detect-changes.
 Use gbrain for durable memory: decisions, state, assumptions, quality gates, hotspots, and handoff notes.
@@ -593,6 +594,12 @@ function codeContextStatus(summary) {
   if (summary.stale) return 'stale';
   if (summary.indexed) return 'ready';
   return 'missing';
+}
+
+function worstStatus(statuses) {
+  if (statuses.includes('blocked')) return 'blocked';
+  if (statuses.some((status) => ['missing', 'stale', 'timeout', 'failed', 'fallback'].includes(status))) return 'partial';
+  return 'ready';
 }
 
 function yamlValue(value) {
@@ -1472,6 +1479,108 @@ async function commandSyncGbrain(args = {}) {
   }, null, 2));
 }
 
+async function commandMemoryCheck() {
+  const config = await loadConfig();
+  const { metaPath, meta } = await readGitNexusMeta(config);
+  const summary = summarizeMeta(config, meta, metaPath);
+  const slugs = pageSlugs(config);
+  const requiredPages = [
+    slugs.overview,
+    slugs.state,
+    slugs.foundation_readiness,
+    slugs.code_context,
+    slugs.quality_gates,
+    slugs.gitnexus_index,
+    slugs.architecture,
+    slugs.hotspots,
+    slugs.handoff,
+  ].filter(Boolean);
+  const missingPages = [];
+  const stalePages = [];
+  const conflicts = [];
+  let gbrainStatus = 'ready';
+  let gbrainQueryStatus = 'not_run';
+
+  const gbrainVersion = runGbrain(['--version'], { timeoutMs: 8000 });
+  if (!gbrainVersion.ok) {
+    gbrainStatus = 'unavailable';
+  } else {
+    const query = runGbrain(['query', `project ${config.project_id} memory health`, '--no-expand', '--limit', '1'], { timeoutMs: 12000 });
+    gbrainQueryStatus = query.ok ? 'ready' : (query.status === 124 ? 'timeout' : 'failed');
+    for (const slug of requiredPages) {
+      const page = getGbrain(slug, { timeoutMs: 8000 });
+      if (!page.ok || !page.stdout.trim()) {
+        missingPages.push(slug);
+        continue;
+      }
+      if (slug === slugs.gitnexus_index && summary.last_commit && !page.stdout.includes(summary.last_commit)) {
+        stalePages.push(slug);
+        conflicts.push({
+          field: 'gitnexus_indexed_commit',
+          gbrain: 'missing_current_indexed_commit',
+          local: summary.last_commit,
+          resolution: 'run sync-gbrain after GitNexus status/refresh',
+        });
+      }
+    }
+    if (gbrainQueryStatus === 'timeout' || gbrainQueryStatus === 'failed') gbrainStatus = gbrainQueryStatus;
+    else if (missingPages.length) gbrainStatus = 'missing';
+    else if (stalePages.length) gbrainStatus = 'stale';
+  }
+
+  const localFiles = [
+    'PROJECT_STATE.md',
+    '.gstack/project-state.json',
+    'docs/CODE_CONTEXT_REPORT.md',
+    '.ai-context/gitnexus-status.json',
+  ];
+  const missingArtifacts = localFiles.filter((rel) => !fsSync.existsSync(path.join(ROOT, rel)));
+  const staleArtifacts = [];
+  const statusArtifact = await readJson(path.join(ROOT, '.ai-context/gitnexus-status.json'), null);
+  if (statusArtifact?.git_head && summary.git_head && statusArtifact.git_head !== summary.git_head) {
+    staleArtifacts.push('.ai-context/gitnexus-status.json');
+  }
+  if (statusArtifact?.last_commit && summary.last_commit && statusArtifact.last_commit !== summary.last_commit) {
+    staleArtifacts.push('.ai-context/gitnexus-status.json');
+  }
+  const localStatus = missingArtifacts.length ? 'missing' : (staleArtifacts.length ? 'stale' : 'ready');
+
+  const gitnexusStatus = codeContextStatus(summary);
+  const verdict = worstStatus([gitnexusStatus, gbrainStatus, localStatus]);
+  console.log(JSON.stringify({
+    schema: 'gstack-harness.memory_check.v1',
+    project_id: config.project_id,
+    generated_at: new Date().toISOString(),
+    verdict,
+    gitnexus: {
+      status: gitnexusStatus,
+      repo: config.gitnexus.repo,
+      git_head: summary.git_head,
+      indexed_commit: summary.last_commit,
+      indexed_at: summary.indexed_at,
+      stale: summary.stale,
+    },
+    gbrain: {
+      status: gbrainStatus,
+      query: gbrainQueryStatus,
+      required_pages: requiredPages,
+      missing_pages: missingPages,
+      stale_pages: stalePages,
+    },
+    local_artifacts: {
+      status: localStatus,
+      missing: missingArtifacts,
+      stale: Array.from(new Set(staleArtifacts)),
+    },
+    conflicts,
+    next_actions: [
+      ...(gitnexusStatus === 'stale' ? ['node scripts/ai-context-bridge.mjs refresh'] : []),
+      ...(missingPages.length || stalePages.length ? ['node scripts/ai-context-bridge.mjs sync-gbrain --dry-run', 'node scripts/ai-context-bridge.mjs sync-gbrain'] : []),
+      ...(missingArtifacts.length || staleArtifacts.length ? ['node scripts/ai-context-bridge.mjs status'] : []),
+    ],
+  }, null, 2));
+}
+
 function runId() {
   return new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, 'Z');
 }
@@ -1794,6 +1903,7 @@ function usage() {
   console.log(`Usage:
   node scripts/ai-context-bridge.mjs init [--project-id id] [--repo path] [--gitnexus-repo name] [--base-branch main]
   node scripts/ai-context-bridge.mjs status
+  node scripts/ai-context-bridge.mjs memory-check
   node scripts/ai-context-bridge.mjs baseline
   node scripts/ai-context-bridge.mjs refresh [--skip-analyze] [--no-embeddings] [--write-gbrain]
   node scripts/ai-context-bridge.mjs sync-gbrain [--dry-run] [--page overview|state|foundation_readiness|code_context|quality_gates|gitnexus_index|architecture|hotspots|handoff|decisions|assumptions|all]
@@ -1812,6 +1922,9 @@ async function main() {
         break;
       case 'status':
         await commandStatus(args);
+        break;
+      case 'memory-check':
+        await commandMemoryCheck(args);
         break;
       case 'baseline':
         await commandBaseline(args);

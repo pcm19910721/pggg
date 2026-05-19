@@ -463,6 +463,8 @@ test_readiness_invariants() {
   assert_json_field "$indexed_dir/.ai-context/runs/test-postchange-impact/run.json" "state.detect_risk === 'low' && state.impact_risks && state.impact_risks[0].target === 'demo' && state.impact_risks[0].risk === 'low'" "postchange did not distinguish detect risk from target impact risk"
   (cd "$indexed_dir" && git add session-change.txt && PATH="$FAKE_BIN:$PATH" node scripts/ai-context-bridge.mjs postchange --scope staged --run-id test-staged-gate > "$TMP_ROOT/postchange-staged-gate.out")
   assert_json_field "$indexed_dir/.ai-context/runs/test-staged-gate/run.json" "state.commit_gate === 'pass' && state.risk_source === 'staged_detect_changes' && state.harness_scope_risk === 'low'" "staged postchange did not produce commit gate"
+  (cd "$indexed_dir" && PATH="$FAKE_BIN:$PATH" node scripts/ai-context-bridge.mjs memory-check > "$TMP_ROOT/memory-check.out")
+  assert_json_field "$TMP_ROOT/memory-check.out" "state.schema === 'gstack-harness.memory_check.v1' && ['ready','partial','blocked'].includes(state.verdict) && state.gitnexus && state.gbrain && state.local_artifacts" "memory-check did not produce memory health report"
 
   local empty_gbrain_dir="$TMP_ROOT/empty-gbrain"
   local empty_fake_bin="$TMP_ROOT/empty-fake-bin"

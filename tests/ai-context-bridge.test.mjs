@@ -88,6 +88,37 @@ printf 'Changes detected without risk line\\n'
   return gitnexus;
 }
 
+function installFakeGbrain(bin, pages = {}) {
+  fs.mkdirSync(bin, { recursive: true });
+  const store = path.join(bin, 'gbrain-pages.json');
+  fs.writeFileSync(store, JSON.stringify(pages, null, 2));
+  const gbrain = path.join(bin, 'gbrain');
+  fs.writeFileSync(gbrain, `#!/usr/bin/env node
+const fs = require('fs');
+const store = ${JSON.stringify(store)};
+const pages = JSON.parse(fs.readFileSync(store, 'utf8'));
+const [command, slug] = process.argv.slice(2);
+if (command === '--version') {
+  console.log('gbrain-test 0.0.0');
+  process.exit(0);
+}
+if (command === 'get') {
+  if (Object.prototype.hasOwnProperty.call(pages, slug)) {
+    process.stdout.write(pages[slug]);
+    process.exit(0);
+  }
+  process.exit(1);
+}
+if (command === 'query') {
+  console.log('ok');
+  process.exit(0);
+}
+process.exit(0);
+`);
+  fs.chmodSync(gbrain, 0o755);
+  return gbrain;
+}
+
 test('refresh discovers GitNexus installed under HOME nvm when default PATH lacks gitnexus', () => {
   const project = tempGitProject();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-context-bridge-home-'));
@@ -219,4 +250,42 @@ test('staged postchange requires review when detect risk is unknown', () => {
   assert.equal(run.detect_risk, 'unknown');
   assert.equal(run.commit_gate, 'needs_review');
   assert.equal(run.warnings.includes('staged_detect_risk_unknown'), true);
+});
+
+test('memory-check reports stale code context and missing gbrain pages', () => {
+  const project = tempGitProject();
+  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-context-bridge-bin-'));
+  installFakeGbrain(fakeBin, {
+    'project/bridge-test/overview': 'type: project_overview\n',
+    'project/bridge-test/gitnexus-index': 'type: gitnexus_index\nindexed_commit: older-commit\n',
+  });
+
+  fs.mkdirSync(path.join(project, '.gitnexus'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.gitnexus', 'meta.json'), JSON.stringify({
+    lastCommit: 'old-commit',
+    indexedAt: '2026-05-10T00:00:00.000Z',
+    stats: { files: 1, nodes: 1, edges: 0 },
+  }));
+  fs.writeFileSync(path.join(project, 'tracked.txt'), 'changed after index\n');
+  spawnSync('git', ['add', 'tracked.txt'], { cwd: project, encoding: 'utf8' });
+  spawnSync('git', ['commit', '-m', 'change after index'], { cwd: project, encoding: 'utf8' });
+
+  const result = spawnSync(process.execPath, [bridge, 'memory-check'], {
+    cwd: project,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.verdict, 'partial');
+  assert.equal(report.gitnexus.status, 'stale');
+  assert.equal(report.gbrain.status, 'missing');
+  assert.equal(report.local_artifacts.status, 'missing');
+  assert.equal(report.gbrain.missing_pages.includes('project/bridge-test/state'), true);
+  assert.equal(report.gbrain.stale_pages.includes('project/bridge-test/gitnexus-index'), true);
+  assert.equal(report.conflicts.some((conflict) => conflict.field === 'gitnexus_indexed_commit'), true);
 });
