@@ -746,11 +746,13 @@ Browser QA: passing/failing/skipped with evidence
 如果设计输出和用户审美不符，记录用户偏好和被拒绝的视觉方向，判断是否需要优化 Design Agent 的输入契约或新增设计偏好记忆能力。
 ```
 
-## R4: Build After Plan
+## R4: Scoped Coding Task / Build After Plan
 
 适用：
 
 ```text
+用户要求修改 bug、功能、脚本、组件、测试或配置
+一句“帮我改这个功能”需要落到实际代码变更
 方案已定
 开始实现代码
 有明确文件范围
@@ -760,9 +762,16 @@ Browser QA: passing/failing/skipped with evidence
 
 ```text
 可选 /freeze 或 /guard
+→ node scripts/ai-context-bridge.mjs baseline，分离本轮改动和历史脏工作区
+→ node scripts/ai-context-bridge.mjs status，确认 Code Context 是否可用
 → R0.5 任务查代码上下文：GitNexus query/context <任务相关问题和关键文件>
-→ 正常 Codex/Claude 编码
-→ /health
+→ 明确 files_to_read、likely_symbols、test_targets、allowed_writes
+→ 修改函数、类或方法前，对目标 symbol 跑 GitNexus upstream impact
+→ HIGH / CRITICAL 风险先向用户报告影响面，再继续或缩小范围
+→ 正常 Codex/Claude 编码，保持最小可验证改动，不做无关重构
+→ 跑最小相关测试；必要时再跑项目级 test / lint / typecheck / shell check
+→ node scripts/ai-context-bridge.mjs postchange --scope all --test-command "<command>" --test-exit-code "<exit code>" --test-artifact "<artifact path>"
+→ .gstack/harness/bin/gstack-harness-workspace-hygiene gate --target .
 → /context-save 如果任务跨轮或较大
 ```
 
@@ -771,7 +780,9 @@ Browser QA: passing/failing/skipped with evidence
 ```text
 代码 diff
 任务上下游和影响面摘要
-health report
+GitNexus impact / detect-changes evidence
+测试命令、退出码和 artifact
+workspace hygiene gate
 实现摘要
 未完成事项
 ```
@@ -780,7 +791,9 @@ health report
 
 ```text
 Phase: build
-Health: passing/failing with evidence
+Health: passing/failing/skipped with evidence
+Code Context postchange: passing/failing/skipped with evidence
+Workspace Hygiene: pass/warning/blocked
 Next recommended agent: Reality Test Agent 或 Review Agent
 ```
 
@@ -788,6 +801,8 @@ Next recommended agent: Reality Test Agent 或 Review Agent
 
 ```text
 如果实现偏离 plan，记录偏离原因，是 plan 不完整、上下文缺失，还是路由错误。
+如果 agent 跳过 impact、测试或 postchange，把缺失字段回填到 coding handoff contract。
+如果 scheduler 派发 coding 任务，默认使用本 recipe 生成 handoff。
 ```
 
 ## R5: User-Visible Feature Verification

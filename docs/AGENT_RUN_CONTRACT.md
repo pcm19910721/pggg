@@ -288,6 +288,14 @@ gitnexus:
   impact:
   detect_risk:
   impact_risks:
+coding:
+  task_intent:
+  files_read:
+  files_changed:
+  symbols_changed:
+  impact_targets:
+  tests_selected_reason:
+  residual_risk:
 tests:
   - command:
     exit_code:
