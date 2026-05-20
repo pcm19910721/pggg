@@ -126,6 +126,8 @@ function groupFor(filePath) {
     'ORCHESTRATOR_RUNBOOK.md',
     'AGENT_ORCHESTRATOR.md',
     'AGENT_WORKFLOWS.md',
+    '.gitignore',
+    '.gitnexusignore',
   ].includes(filePath)) {
     return 'protocol';
   }

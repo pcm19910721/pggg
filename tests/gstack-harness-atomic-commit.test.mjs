@@ -167,6 +167,7 @@ test('atomic commit dry-run groups changes without committing', () => {
   fs.writeFileSync(path.join(project, 'docs', 'guide.md'), '# guide\n');
   fs.writeFileSync(path.join(project, 'tests', 'sample.test.mjs'), 'import test from "node:test";\n');
   fs.writeFileSync(path.join(project, 'WORKFLOW_RECIPES.md'), '# recipes\n');
+  fs.writeFileSync(path.join(project, '.gitignore'), 'node_modules/\n');
 
   const result = runAtomic(project, ['--dry-run']);
 

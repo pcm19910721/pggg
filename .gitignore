@@ -21,6 +21,8 @@ Thumbs.db
 .gstack/project-state.json
 .gstack/readiness-last.json
 .gstack/remediation-last.out
+.gstack/workspace-hygiene.json
+.gstack/workspace-hygiene-baseline.json
 .gstack/*-last.*
 .gstack/scheduler/
 .gstack/harness/agents/
@@ -31,6 +33,7 @@ PROJECT_STATE.md
 docs/AGENTS_STATUS.md
 docs/CODE_CONTEXT_REPORT.md
 docs/FOUNDATION_READINESS_REPORT.md
+docs/WORKSPACE_HYGIENE_REPORT.md
 docs/agents/*.json
 docs/USAGE_FEEDBACK_REPORT.md
 output/imagegen/
