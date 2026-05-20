@@ -1,0 +1,396 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+gstack-harness-atomic-commit - create gated atomic commits for harness work
+
+Usage:
+  gstack-harness-atomic-commit [--target DIR] [--dry-run] [--no-commit] [--json]
+
+Default behavior stages one atomic group at a time, runs the staged commit gate,
+commits passing groups, and refreshes the code-context baseline when available.
+Use --dry-run to preview grouping without staging or committing.
+EOF
+}
+
+TARGET="."
+DRY_RUN=0
+NO_COMMIT=0
+PRINT_JSON=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --target)
+      TARGET="${2:-}"
+      shift 2
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    --no-commit)
+      NO_COMMIT=1
+      shift
+      ;;
+    --json)
+      PRINT_JSON=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "$TARGET" ]; then
+  echo "ERROR: --target requires a directory" >&2
+  exit 2
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "ERROR: node is required for atomic commit" >&2
+  exit 2
+fi
+
+TARGET_DIR="$(cd "$TARGET" && pwd)"
+
+TARGET_DIR="$TARGET_DIR" DRY_RUN="$DRY_RUN" NO_COMMIT="$NO_COMMIT" PRINT_JSON="$PRINT_JSON" node <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const { spawnSync } = require('child_process');
+
+const target = process.env.TARGET_DIR;
+const dryRun = process.env.DRY_RUN === '1';
+const noCommit = process.env.NO_COMMIT === '1';
+const printJson = process.env.PRINT_JSON === '1';
+
+function run(bin, args, opts = {}) {
+  const result = spawnSync(bin, args, {
+    cwd: opts.cwd || target,
+    encoding: 'utf8',
+    env: opts.env || process.env,
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  return {
+    ok: result.status === 0,
+    status: result.status,
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+    error: result.error,
+  };
+}
+
+function fail(message, code = 1) {
+  process.stderr.write(`${message}\n`);
+  process.exit(code);
+}
+
+function ensureGitRepo() {
+  const result = run('git', ['rev-parse', '--is-inside-work-tree']);
+  if (!result.ok) fail('ERROR: target is not a git repository', 2);
+}
+
+function parseStatusLine(line) {
+  const raw = String(line || '').trimEnd();
+  if (!raw) return null;
+  const rename = raw.match(/^.. (.+) -> (.+)$/);
+  const filePath = rename ? rename[2] : raw.slice(3).trim();
+  if (!filePath) return null;
+  return { code: raw.slice(0, 2), path: filePath };
+}
+
+function changedFiles() {
+  const result = run('git', ['status', '--short', '--untracked-files=all']);
+  if (!result.ok) fail(result.stderr || 'ERROR: unable to read git status', 2);
+  return result.stdout.split(/\r?\n/).map(parseStatusLine).filter(Boolean);
+}
+
+function groupFor(filePath) {
+  if (filePath.startsWith('tests/') || filePath.endsWith('.test.mjs') || filePath.endsWith('.test.js')) {
+    return 'tests';
+  }
+  if ([
+    'AGENTS.md',
+    'CLAUDE.md',
+    'CLAUDE_MD_TEMPLATE.md',
+    'PROJECT_STATE_TEMPLATE.md',
+    'WORKFLOW_RECIPES.md',
+    'SYSTEM_TUNING_LOOP.md',
+    'ORCHESTRATOR_RUNBOOK.md',
+    'AGENT_ORCHESTRATOR.md',
+    'AGENT_WORKFLOWS.md',
+  ].includes(filePath)) {
+    return 'protocol';
+  }
+  if (filePath.startsWith('bin/')
+    || filePath.startsWith('scripts/')
+    || filePath.startsWith('.gstack/agents/')
+    || filePath === 'package.json'
+    || filePath === 'package-lock.json') {
+    return 'harness';
+  }
+  if (filePath.startsWith('docs/') || filePath.endsWith('.md')) {
+    return 'docs';
+  }
+  return 'mixed';
+}
+
+const groupOrder = ['harness', 'tests', 'docs', 'protocol', 'mixed'];
+const messages = {
+  docs: 'docs: update harness documentation',
+  tests: 'test: update harness tests',
+  harness: 'feat: update harness automation',
+  protocol: 'docs: update project protocol',
+  mixed: 'chore: update workspace changes',
+};
+
+function buildGroups(entries) {
+  const groups = new Map();
+  for (const entry of entries) {
+    if (entry.path.startsWith('.ai-context/')
+      || entry.path.startsWith('.gitnexus/')
+      || entry.path === '.gstack/workspace-hygiene.json'
+      || entry.path === '.gstack/workspace-hygiene-baseline.json'
+      || entry.path === 'docs/WORKSPACE_HYGIENE_REPORT.md'
+      || entry.path === 'docs/agents/workspace-hygiene.json') continue;
+    const id = groupFor(entry.path);
+    if (!groups.has(id)) groups.set(id, []);
+    groups.get(id).push(entry.path);
+  }
+  return groupOrder
+    .filter((id) => groups.has(id))
+    .map((id) => ({
+      id,
+      message: messages[id],
+      files: Array.from(new Set(groups.get(id))).sort(),
+    }));
+}
+
+function bridgePath() {
+  const candidate = path.join(target, 'scripts', 'ai-context-bridge.mjs');
+  return fs.existsSync(candidate) ? candidate : null;
+}
+
+function refreshBaseline(phase, events) {
+  const bridge = bridgePath();
+  if (!bridge) {
+    events.push({ type: 'baseline', phase, status: 'skipped', reason: 'missing_ai_context_bridge' });
+    return true;
+  }
+  const result = run(process.execPath, [bridge, 'baseline']);
+  events.push({ type: 'baseline', phase, status: result.status, ok: result.ok });
+  return result.ok;
+}
+
+function localHygienePath() {
+  const candidates = [
+    path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-workspace-hygiene'),
+    path.join(target, 'bin', 'gstack-harness-workspace-hygiene'),
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+}
+
+function runHygieneGate(events, group) {
+  const hygiene = localHygienePath();
+  if (!hygiene) {
+    events.push({ type: 'workspace_hygiene', group: group.id, status: 'skipped', reason: 'missing_workspace_hygiene' });
+    return true;
+  }
+  const result = run(hygiene, ['gate', '--target', target]);
+  events.push({ type: 'workspace_hygiene', group: group.id, status: result.status, ok: result.ok });
+  return result.ok;
+}
+
+function readJson(file, fallback = null) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return fallback;
+  }
+}
+
+function discoverGitNexusRepoAlias() {
+  const list = run('gitnexus', ['list']);
+  if (!list.ok) return null;
+  const lines = list.stdout.split(/\r?\n/);
+  const normalizedTarget = path.resolve(target);
+  for (let i = 0; i < lines.length; i += 1) {
+    const pathMatch = lines[i].match(/^\s*Path:\s+(.+)\s*$/);
+    if (!pathMatch || path.resolve(pathMatch[1]) !== normalizedTarget) continue;
+    for (let j = i - 1; j >= 0; j -= 1) {
+      const name = lines[j].trim();
+      if (name && !name.includes(':') && !name.startsWith('Indexed Repositories')) return name;
+    }
+  }
+  return null;
+}
+
+function writeBridgeRepoAlias(repoAlias) {
+  const configPath = path.join(target, '.ai-context', 'project.json');
+  const config = readJson(configPath, null);
+  if (!config?.gitnexus || !repoAlias || config.gitnexus.repo === repoAlias) return null;
+  const original = fs.readFileSync(configPath, 'utf8');
+  config.gitnexus.repo = repoAlias;
+  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  return original;
+}
+
+function restoreBridgeRepoAlias(original) {
+  if (!original) return;
+  const configPath = path.join(target, '.ai-context', 'project.json');
+  fs.writeFileSync(configPath, original, 'utf8');
+}
+
+function runBridgePostchange(bridge, runId) {
+  return run(process.execPath, [bridge, 'postchange', '--scope', 'staged', '--run-id', runId]);
+}
+
+function runStagedPostchange(events, group) {
+  const bridge = bridgePath();
+  if (!bridge) {
+    events.push({ type: 'postchange', group: group.id, status: 'skipped', commit_gate: 'pass', reason: 'missing_ai_context_bridge' });
+    return { ok: true, commitGate: 'pass' };
+  }
+  const runId = `atomic-${Date.now()}-${group.id}`;
+  const repoAlias = discoverGitNexusRepoAlias();
+  const originalRepo = writeBridgeRepoAlias(repoAlias);
+  const result = runBridgePostchange(bridge, runId);
+  restoreBridgeRepoAlias(originalRepo);
+  const runJson = readJson(path.join(target, '.ai-context', 'runs', runId, 'run.json'), {});
+  const detectTextPath = path.join(target, '.ai-context', 'runs', runId, 'detect-changes.txt');
+  const detectText = fs.existsSync(detectTextPath) ? fs.readFileSync(detectTextPath, 'utf8') : '';
+  let commitGate = runJson.commit_gate || (result.ok ? 'needs_review' : 'blocked');
+  let noIndexedChangesOverride = false;
+  if (commitGate === 'needs_review'
+    && result.ok
+    && group.id !== 'mixed'
+    && /No changes detected\./.test(detectText)
+    && Array.isArray(runJson.session_changed_files)
+    && runJson.session_changed_files.length > 0
+    && runJson.workspace_hygiene?.commit_gate === 'pass') {
+    commitGate = 'pass';
+    noIndexedChangesOverride = true;
+  }
+  events.push({
+    type: 'postchange',
+    group: group.id,
+    run_id: runId,
+    status: result.status,
+    ok: result.ok,
+    commit_gate: commitGate,
+    used_repo_alias: originalRepo ? repoAlias : null,
+    no_indexed_changes_override: noIndexedChangesOverride,
+    warnings: runJson.warnings || [],
+  });
+  return { ok: result.ok && commitGate === 'pass', commitGate };
+}
+
+function unstageAll() {
+  run('git', ['reset', '-q', '--']);
+}
+
+function stageGroup(group) {
+  const result = run('git', ['add', '--', ...group.files]);
+  if (!result.ok) fail(result.stderr || `ERROR: unable to stage ${group.id}`, 2);
+}
+
+function commitGroup(group) {
+  const result = run('git', ['commit', '-m', group.message]);
+  return result;
+}
+
+ensureGitRepo();
+
+const groups = buildGroups(changedFiles());
+const summary = {
+  schema: 'gstack-harness.atomic_commit.v1',
+  target,
+  dry_run: dryRun,
+  no_commit: noCommit,
+  groups,
+  commits: [],
+  stopped: false,
+  events: [],
+};
+
+if (groups.length === 0) {
+  if (printJson) process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+  else process.stdout.write('No changes to commit.\n');
+  process.exit(0);
+}
+
+if (dryRun) {
+  if (printJson) {
+    process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+  } else {
+    process.stdout.write('Atomic commit plan:\n');
+    for (const group of groups) {
+      process.stdout.write(`- ${group.message}\n`);
+      for (const file of group.files) process.stdout.write(`  ${file}\n`);
+    }
+  }
+  process.exit(0);
+}
+
+refreshBaseline('before', summary.events);
+
+for (const group of groups) {
+  unstageAll();
+  stageGroup(group);
+
+  const hygieneOk = runHygieneGate(summary.events, group);
+  if (!hygieneOk) {
+    summary.stopped = true;
+    summary.stop_reason = 'workspace_hygiene_blocked';
+    summary.stop_group = group.id;
+    unstageAll();
+    if (printJson) process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+    fail(`Atomic commit stopped: workspace hygiene blocked ${group.id}`, 1);
+  }
+
+  const postchange = runStagedPostchange(summary.events, group);
+  if (!postchange.ok) {
+    summary.stopped = true;
+    summary.stop_reason = `commit_gate_${postchange.commitGate}`;
+    summary.stop_group = group.id;
+    unstageAll();
+    if (printJson) process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+    fail(`Atomic commit stopped: staged commit gate ${postchange.commitGate} for ${group.id}`, 1);
+  }
+
+  if (noCommit) {
+    summary.commits.push({ group: group.id, message: group.message, status: 'ready' });
+    unstageAll();
+    continue;
+  }
+
+  const commit = commitGroup(group);
+  if (!commit.ok) {
+    summary.stopped = true;
+    summary.stop_reason = 'git_commit_failed';
+    summary.stop_group = group.id;
+    unstageAll();
+    if (printJson) process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+    fail(commit.stderr || `Atomic commit stopped: git commit failed for ${group.id}`, 1);
+  }
+  summary.commits.push({ group: group.id, message: group.message, status: 'committed' });
+}
+
+unstageAll();
+refreshBaseline('after', summary.events);
+
+if (printJson) {
+  process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+} else {
+  for (const commit of summary.commits) {
+    process.stdout.write(`${commit.status}: ${commit.message}\n`);
+  }
+}
+NODE

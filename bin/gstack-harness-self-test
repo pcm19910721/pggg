@@ -245,6 +245,8 @@ test_fresh_install() {
     ".gstack/harness/bin/gstack-harness-readiness"
     ".gstack/harness/bin/gstack-harness-agent-status"
     ".gstack/harness/bin/gstack-harness-schedule"
+    ".gstack/harness/bin/gstack-harness-workspace-hygiene"
+    ".gstack/harness/bin/gstack-harness-atomic-commit"
     ".ai-context/project.json"
     ".ai-context/FIELD_CONTRACT.md"
     ".ai-context/gitnexus-status.json"
@@ -870,6 +872,8 @@ main() {
   bash -n "$SCRIPT_DIR/gstack-harness-readiness"
   bash -n "$SCRIPT_DIR/gstack-harness-agent-status"
   bash -n "$SCRIPT_DIR/gstack-harness-schedule"
+  bash -n "$SCRIPT_DIR/gstack-harness-workspace-hygiene"
+  bash -n "$SCRIPT_DIR/gstack-harness-atomic-commit"
   node --check "$TEMPLATE_ROOT/scripts/ai-context-bridge.mjs" >/dev/null
   node --check "$TEMPLATE_ROOT/scripts/gstack-scheduler.mjs" >/dev/null
   pass "init script syntax"
