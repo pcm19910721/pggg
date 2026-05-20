@@ -17,6 +17,7 @@
 | 读取项目状态 | 当前阶段、分支、最近改动、测试状态、部署状态、未解决问题 |
 | 读取 skill registry | 理解可用 gstack skills、触发条件、输入输出和门禁影响 |
 | 读取 workflow recipes | 根据用户意图选择已定义的 skill 串联方式 |
+| 读取 capability-first workflow | 新产品、新功能、新 agent、新自动化先按能力模块拆解、检索、复用、补缺口 |
 | 读取 tuning loop | 理解系统运行卡点、能力缺口和 Agent 优化策略 |
 | 读取 gbrain 记忆 | 读取长期事实、用户偏好、Agent 能力缺口和历史决策 |
 | 读取 Code Context | 读取 GitNexus status/index、reading path、hotspots、call/context 和 diff impact evidence；UA 只作可选增强 |
@@ -41,27 +42,29 @@
 3. 读取 .gstack/harness/agents/TEAM.md 和 problem-handling.md
 4. 读取 GSTACK_SKILL_REGISTRY.md
 5. 读取 WORKFLOW_RECIPES.md
-6. 读取 ORCHESTRATOR_RUNBOOK.md
-7. 读取 SYSTEM_TUNING_LOOP.md
-8. 读取 MEMORY_ARCHITECTURE.md
-9. 读取 GBRAIN_SCHEMA.md
-10. 查询 gbrain 中的相关 global/project/agent memory
-11. 读取 docs/AGENT_ORCHESTRATOR.md
-12. 读取 docs/AGENT_WORKFLOWS.md
-13. 读取 git status 和最近 diff
-14. 检查 .ai-context/project.json / GitNexus status 是否存在和是否适用于本轮任务；UA artifacts 只在 dashboard/onboarding/domain/fallback 时检查
-15. 检查 Workspace Hygiene 状态；提交/ship/review 前必须确认 commit gate
-16. 检查 Foundation Readiness；如果未知、partial 或 blocked，先走 R-1 / R-0.5
-17. 将用户当前输入与同一 session 最近 1-2 次 Codex 输出进行对照
-18. 判断用户输入类型：确认、纠正、补充需求、改变方向、指出缺失上下文、升级信号或普通任务
-19. 检查当前阶段和质量门禁
-20. 解决 gbrain 与本地文档冲突，默认以 gbrain 为准
-21. 选择 workflow recipe 和一个或多个 gstack skills
-22. 生成明确交接任务
-23. gstack skills 执行
-24. 总控 Agent 汇总 artifact/evidence 并更新 PROJECT_STATE.md
-25. 记录 system tuning notes：误路由、能力缺口、交接失败、需要新增或优化的 Agent
-26. 按 GBRAIN_SCHEMA.md 将长期有价值的结论写入 gbrain
+6. 读取 docs/CAPABILITY_FIRST_WORKFLOW.md
+7. 读取 ORCHESTRATOR_RUNBOOK.md
+8. 读取 SYSTEM_TUNING_LOOP.md
+9. 读取 MEMORY_ARCHITECTURE.md
+10. 读取 GBRAIN_SCHEMA.md
+11. 查询 gbrain 中的相关 global/project/agent memory
+12. 读取 docs/AGENT_ORCHESTRATOR.md
+13. 读取 docs/AGENT_WORKFLOWS.md
+14. 读取 git status 和最近 diff
+15. 检查 .ai-context/project.json / GitNexus status 是否存在和是否适用于本轮任务；UA artifacts 只在 dashboard/onboarding/domain/fallback 时检查
+16. 检查 Workspace Hygiene 状态；提交/ship/review 前必须确认 commit gate
+17. 检查 Foundation Readiness；如果未知、partial 或 blocked，先走 R-1 / R-0.5
+18. 将用户当前输入与同一 session 最近 1-2 次 Codex 输出进行对照
+19. 判断用户输入类型：确认、纠正、补充需求、改变方向、指出缺失上下文、升级信号或普通任务
+20. 检查当前阶段和质量门禁
+21. 解决 gbrain 与本地文档冲突，默认以 gbrain 为准
+22. 新产品、新功能、新 agent、新自动化先按 capability-first workflow 拆能力、查已有模块、判定 reuse/adapt/missing
+23. 选择 workflow recipe 和一个或多个 gstack skills
+24. 生成明确交接任务
+25. gstack skills 执行
+26. 总控 Agent 汇总 artifact/evidence 并更新 PROJECT_STATE.md
+27. 记录 system tuning notes：误路由、能力缺口、交接失败、需要新增或优化的 Agent
+28. 按 GBRAIN_SCHEMA.md 将长期有价值的结论写入 gbrain
 ```
 
 ## 路由规则
@@ -77,6 +80,7 @@
 | “这次 diff 影响什么” | Code Context Agent：bridge postchange / GitNexus impact |
 | “git status 很乱/文件变多了/QA 后目录变大了” | Workspace Hygiene Agent：扫描、分桶、增长报告、ignore 建议 |
 | “我有个新想法” | 已有代码项目先 Code Context Agent：R0.5；再 Product Agent：`/office-hours` |
+| “做一个新产品/功能/agent/自动化” | Capability-First：C-1，先找已有模块和 recipe，再补缺失能力 |
 | “帮我规划一下” | Planning Agent：`/autoplan` |
 | “这个方向要不要做大” | Product Agent：`/plan-ceo-review` |
 | “架构怎么设计” | Architecture Agent：`/plan-eng-review` |
@@ -111,6 +115,7 @@
 15. 已有代码项目在 `/office-hours` 前先确认 Code Context 是否可用；没有 GitNexus 状态或上下文时先跑 R0.5，避免产品判断脱离当前能力和风险。
 16. Build、Review、Incident 类任务必须能说明相关模块、上游、下游、影响面和建议测试；不能说明时先派发 Code Context Agent。
 17. 提交、review、ship 前如果 Workspace Hygiene commit gate 是 blocked，必须先处理或明确记录 skip 风险。
+18. 产品工作默认按 `docs/CAPABILITY_FIRST_WORKFLOW.md` 执行：没有这些模块时，先找；找不到再定义和实现最小可复用模块。
 
 ## 质量门禁建议
 

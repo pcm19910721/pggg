@@ -83,6 +83,60 @@ handoff:
 system_tuning_hooks:
 ```
 
+## C-1: Capability-First Product Build
+
+适用：
+
+```text
+用户提出新产品、新功能、新 agent、新自动化、新业务流程
+用户说“以后这就是我的工作方式”
+一个需求看起来可以由 UI 壳、热更新、权限、能力模块和流程编排组成
+```
+
+核心原则：
+
+```text
+先找模块，再写模块。
+先定义能力契约，再实现能力。
+先复用已有 recipe / skill / script / agent，再补缺口。
+产品差异优先落在 workflow recipe、permission policy、module manifest 和 UI shell config。
+```
+
+流程：
+
+```text
+读取 docs/CAPABILITY_FIRST_WORKFLOW.md
+→ 将用户需求拆成 required capabilities
+→ 搜索 WORKFLOW_RECIPES、GSTACK_SKILL_REGISTRY、docs/agents、scripts、现有项目模块
+→ 必要时用 GitNexus query/context 找已有实现路径
+→ 为每个 capability 判定：reuse / adapt / missing
+→ 对 missing capability 写 capability gap 和最小模块契约
+→ 实现或派发实现前先确认影响面和测试策略
+→ 将 capabilities 编排为 workflow recipe
+→ 验证 permission、hot update、rollback、observability
+→ 更新 PROJECT_STATE、相关 docs、system tuning notes
+```
+
+产物：
+
+```text
+capability inventory
+reuse/adapt/missing 判定
+missing capability contracts
+workflow recipe
+verification notes
+capability gaps or registry updates
+```
+
+质量门禁：
+
+```text
+不能在未搜索已有能力时直接新写模块。
+不能只有 UI 隐藏权限；运行时动作也必须声明权限。
+热更新优先更新 manifest/config/recipe/policy；可执行代码热更新必须有版本、回滚和审计。
+模块进入复用前至少要有输入、输出、权限和验证说明。
+```
+
 ## Harness Init Preflow
 
 目标项目里的产品入口：

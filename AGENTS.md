@@ -52,6 +52,14 @@ This project is indexed by GitNexus as **gstack-multiagent** (977 symbols, 1581 
 - Promote stable repeated work in this order: handoff rule, workflow recipe, agent capability, scheduled candidate, capability gap, possible new skill.
 - Do not silently enable recurring work. Create a scheduled candidate until cadence, permissions, outputs, failure handling, monitoring, and user approval are explicit.
 
+## Capability-First Product Work
+
+- Treat product work as `UI shell + hot update + permission checks + capability modules + workflow orchestration`.
+- Before building a new product feature, automation, agent, or workflow, identify the required capability modules and search for existing modules, recipes, scripts, skills, and GitNexus paths first.
+- If a required module exists, reuse or adapt it through its declared contract instead of duplicating behavior.
+- If a required module is missing, define the module contract first, implement the smallest reusable version, register it for future discovery, then compose it into the workflow.
+- Use `docs/CAPABILITY_FIRST_WORKFLOW.md` as the durable protocol for this work style.
+
 ## Context Boundary And Handoff Rules
 
 - Treat the active chat as a temporary workbench, not a durable memory system.
