@@ -5,6 +5,7 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
 const ROOT = process.cwd();
 const CONFIG_PATH = path.join(ROOT, '.ai-context', 'project.json');
@@ -196,6 +197,14 @@ async function exists(filePath) {
 async function readJson(filePath, fallback = null) {
   try {
     return JSON.parse(await fs.readFile(filePath, 'utf-8'));
+  } catch {
+    return fallback;
+  }
+}
+
+function readJsonSync(filePath, fallback = null) {
+  try {
+    return JSON.parse(fsSync.readFileSync(filePath, 'utf-8'));
   } catch {
     return fallback;
   }
@@ -1719,6 +1728,38 @@ function sessionRiskFromDelta(scope, detectRisk, sessionChangedFiles, preexistin
   };
 }
 
+function readWorkspaceHygieneReport() {
+  return readJsonSync(path.join(ROOT, '.gstack', 'workspace-hygiene.json'), null);
+}
+
+function runWorkspaceHygieneGate() {
+  const local = path.join(ROOT, '.gstack', 'harness', 'bin', 'gstack-harness-workspace-hygiene');
+  const source = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'gstack-harness-workspace-hygiene');
+  const runner = fsSync.existsSync(local) ? local : source;
+  if (!fsSync.existsSync(runner)) return null;
+  run(runner, ['gate', '--target', ROOT], { cwd: ROOT });
+  return readWorkspaceHygieneReport();
+}
+
+function mergeWorkspaceHygieneGate(sessionRisk, workspaceHygiene) {
+  if (!workspaceHygiene) return sessionRisk;
+  const warnings = [...sessionRisk.warnings];
+  if (workspaceHygiene.commit_gate === 'blocked') warnings.push('workspace_hygiene_commit_gate_blocked');
+  if (workspaceHygiene.commit_gate === 'warning') warnings.push('workspace_hygiene_commit_gate_warning');
+  const commitGate = workspaceHygiene.commit_gate === 'blocked'
+    ? 'blocked'
+    : (workspaceHygiene.commit_gate === 'warning' && sessionRisk.commit_gate === 'pass' ? 'needs_review' : sessionRisk.commit_gate);
+  const risk = workspaceHygiene.commit_gate === 'blocked' && !['critical', 'high'].includes(sessionRisk.risk)
+    ? 'needs_review'
+    : sessionRisk.risk;
+  return {
+    ...sessionRisk,
+    risk,
+    commit_gate: commitGate,
+    warnings: Array.from(new Set(warnings)),
+  };
+}
+
 async function commandBaseline() {
   const config = await loadConfig();
   if (!isGitRepo(config.repo_path)) {
@@ -1786,7 +1827,11 @@ async function commandPostchange(args) {
   }
 
   const detectRisk = extractRisk(detectText);
-  const sessionRisk = sessionRiskFromDelta(scope, detectRisk, sessionChangedFiles, preexistingDirtyFiles, baseline);
+  const workspaceHygiene = scope === 'staged' ? runWorkspaceHygieneGate() : readWorkspaceHygieneReport();
+  const sessionRisk = mergeWorkspaceHygieneGate(
+    sessionRiskFromDelta(scope, detectRisk, sessionChangedFiles, preexistingDirtyFiles, baseline),
+    workspaceHygiene,
+  );
   const impactRisks = impacts.map((impact) => ({ target: impact.target, risk: impact.risk }));
   const risk = impacts.find((impact) => ['critical', 'high'].includes(impact.risk))?.risk || sessionRisk.risk;
   const note = `---
@@ -1823,6 +1868,7 @@ generated_at: ${new Date().toISOString()}
 - Harness scope risk: ${sessionRisk.risk}
 - Risk source: ${sessionRisk.source}
 - Commit gate: ${sessionRisk.commit_gate}
+- Workspace hygiene: ${workspaceHygiene?.commit_gate || 'not_run'}
 - Working tree: ${status ? 'dirty' : 'clean'}
 - Session changed files: ${sessionChangedFiles.length}
 - Preexisting dirty files: ${preexistingDirtyFiles.length}
@@ -1875,6 +1921,13 @@ ${markdownTestEvidence(tests)}
     session_changed_files: sessionChangedFiles,
     preexisting_dirty_files: preexistingDirtyFiles,
     warnings: sessionRisk.warnings,
+    workspace_hygiene: workspaceHygiene ? {
+      status: workspaceHygiene.status,
+      commit_gate: workspaceHygiene.commit_gate,
+      blockers: workspaceHygiene.blockers || [],
+      warnings: workspaceHygiene.warnings || [],
+      report: workspaceHygiene.report || 'docs/WORKSPACE_HYGIENE_REPORT.md',
+    } : null,
     impact_risks: impactRisks,
     impact_targets: impacts,
     tests,
@@ -1897,6 +1950,13 @@ ${markdownTestEvidence(tests)}
     session_changed_files: sessionChangedFiles,
     preexisting_dirty_files: preexistingDirtyFiles,
     warnings: sessionRisk.warnings,
+    workspace_hygiene: workspaceHygiene ? {
+      status: workspaceHygiene.status,
+      commit_gate: workspaceHygiene.commit_gate,
+      blockers: workspaceHygiene.blockers || [],
+      warnings: workspaceHygiene.warnings || [],
+      report: workspaceHygiene.report || 'docs/WORKSPACE_HYGIENE_REPORT.md',
+    } : null,
     impact_risks: impactRisks,
     impact_targets: impacts.map((impact) => impact.target),
     tests,

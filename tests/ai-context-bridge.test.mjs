@@ -313,6 +313,44 @@ test('staged postchange requires review when detect risk is unknown', () => {
   assert.equal(run.warnings.includes('staged_detect_risk_unknown'), true);
 });
 
+test('staged postchange incorporates workspace hygiene commit gate blockers', () => {
+  const project = tempGitProject();
+  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-context-bridge-bin-'));
+  installFakeDetectGitNexus(fakeBin, 'low');
+  fs.mkdirSync(path.join(project, '.gitnexus'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.gitnexus', 'meta.json'), JSON.stringify({
+    lastCommit: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: project, encoding: 'utf8' }).stdout.trim(),
+    indexedAt: '2026-05-10T00:00:00.000Z',
+    stats: { files: 1, nodes: 1, edges: 0 },
+  }));
+
+  const baseline = spawnSync(process.execPath, [bridge, 'baseline'], {
+    cwd: project,
+    encoding: 'utf8',
+  });
+  assert.equal(baseline.status, 0, baseline.stderr || baseline.stdout);
+
+  fs.writeFileSync(path.join(project, '.env'), 'TOKEN=secret\n');
+  spawnSync('git', ['add', '.env'], { cwd: project, encoding: 'utf8' });
+
+  const postchange = spawnSync(process.execPath, [bridge, 'postchange', '--scope', 'staged', '--run-id', 'staged-hygiene'], {
+    cwd: project,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(postchange.status, 0, postchange.stderr || postchange.stdout);
+  const run = JSON.parse(fs.readFileSync(path.join(project, '.ai-context', 'runs', 'staged-hygiene', 'run.json'), 'utf8'));
+  assert.equal(run.detect_risk, 'low');
+  assert.equal(run.commit_gate, 'blocked');
+  assert.equal(run.workspace_hygiene.commit_gate, 'blocked');
+  assert.equal(run.workspace_hygiene.blockers.includes('secret_risk_staged'), true);
+  assert.equal(run.warnings.includes('workspace_hygiene_commit_gate_blocked'), true);
+});
+
 test('memory-check reports stale code context and missing gbrain pages', () => {
   const project = tempGitProject();
   const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-context-bridge-bin-'));

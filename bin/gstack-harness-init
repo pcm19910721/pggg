@@ -816,12 +816,13 @@ copy_file "bin/gstack-harness-remediate" ".gstack/harness/bin/gstack-harness-rem
 copy_file "bin/gstack-harness-readiness" ".gstack/harness/bin/gstack-harness-readiness"
 copy_file "bin/gstack-harness-agent-status" ".gstack/harness/bin/gstack-harness-agent-status"
 copy_file "bin/gstack-harness-schedule" ".gstack/harness/bin/gstack-harness-schedule"
+copy_file "bin/gstack-harness-workspace-hygiene" ".gstack/harness/bin/gstack-harness-workspace-hygiene"
 copy_file "scripts/ai-context-bridge.mjs" "scripts/ai-context-bridge.mjs"
 copy_file "scripts/gstack-scheduler.mjs" "scripts/gstack-scheduler.mjs"
 copy_file "docs/SCHEDULER_MODEL.md" "docs/SCHEDULER_MODEL.md"
 
 if [ "$DRY_RUN" -ne 1 ]; then
-  chmod +x "$TARGET_DIR/.gstack/harness/bin/pggg" "$TARGET_DIR/.gstack/harness/bin/pcm-harness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-record-run" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-usage-report" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-enable-report-timer" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-schedule" "$TARGET_DIR/scripts/ai-context-bridge.mjs" "$TARGET_DIR/scripts/gstack-scheduler.mjs" 2>/dev/null || true
+  chmod +x "$TARGET_DIR/.gstack/harness/bin/pggg" "$TARGET_DIR/.gstack/harness/bin/pcm-harness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-record-run" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-usage-report" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-enable-report-timer" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-schedule" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-workspace-hygiene" "$TARGET_DIR/scripts/ai-context-bridge.mjs" "$TARGET_DIR/scripts/gstack-scheduler.mjs" 2>/dev/null || true
 fi
 
 AGENT_TEAM_CONTENT="$(cat <<EOF
@@ -844,6 +845,7 @@ These agents are always present and cannot be removed by project overrides.
 | Problem Handling Agent | Handles warnings, timeouts, runner failures, repeated friction, and unclear blockers. | Any runtime issue |
 | Memory / GBrain Agent | Owns durable memory reads/writes, conflict policy, and gbrain schema discipline. | Memory read/write/conflict |
 | System Tuning Agent | Converts repeated failures into harness/agent/workflow improvements. | Recurring issue or capability gap |
+| Workspace Hygiene Agent | Classifies generated artifacts, workspace growth, .gitignore recommendations, and dangerous commit gates. | QA/test aftermath, large dirty worktree, commit/release preflight |
 
 ## Default Capability Agents
 
@@ -1593,7 +1595,8 @@ PROJECT_STATE_JSON="$(cat <<EOF
       "foundation-remediation",
       "problem-handling",
       "memory-gbrain",
-      "system-tuning"
+      "system-tuning",
+      "workspace-hygiene"
     ],
     "default_capability": [
       "product",
@@ -1656,7 +1659,35 @@ PROJECT_STATE_JSON="$(cat <<EOF
     "usage_runs": ".gstack/usage-runs",
     "foundation_readiness_runner": ".gstack/harness/bin/gstack-harness-readiness",
     "agent_status_runner": ".gstack/harness/bin/gstack-harness-agent-status",
+    "workspace_hygiene_report": "docs/WORKSPACE_HYGIENE_REPORT.md",
+    "workspace_hygiene_json": ".gstack/workspace-hygiene.json",
+    "workspace_hygiene_baseline": ".gstack/workspace-hygiene-baseline.json",
+    "workspace_hygiene_runner": ".gstack/harness/bin/gstack-harness-workspace-hygiene",
     "usage_report_timer": ".gstack/harness/bin/gstack-harness-enable-report-timer"
+  },
+  "workspace_hygiene": {
+    "status": "unknown",
+    "report": "docs/WORKSPACE_HYGIENE_REPORT.md",
+    "baseline_path": ".gstack/workspace-hygiene-baseline.json",
+    "commit_gate": "unknown",
+    "policy": {
+      "scan_ignored_files": true,
+      "scan_untracked_files": true,
+      "scan_modified_files": true,
+      "scan_staged_files": true,
+      "max_report_items_per_bucket": 25,
+      "large_file_threshold_mb": 10,
+      "large_directory_threshold_mb": 100,
+      "secret_risk_blocks_commit": true,
+      "browser_profile_blocks_commit": true,
+      "generated_runtime_blocks_commit": true,
+      "large_asset_blocks_commit": "ask",
+      "auto_apply_gitignore": false,
+      "auto_delete_files": false,
+      "auto_move_files": false
+    },
+    "warnings": [],
+    "blockers": []
   },
   "usage": {
     "runs_dir": ".gstack/usage-runs",
@@ -2045,7 +2076,8 @@ SUMMARY_JSON="$(cat <<EOF
       "foundation-remediation",
       "problem-handling",
       "memory-gbrain",
-      "system-tuning"
+      "system-tuning",
+      "workspace-hygiene"
     ],
     "replaceable": [
       "product",

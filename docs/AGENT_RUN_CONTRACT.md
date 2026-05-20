@@ -54,6 +54,7 @@ PROJECT_STATE.md
 .gstack/project-state.json
 docs/CODE_CONTEXT_REPORT.md
 .ai-context/gitnexus-status.json
+.gstack/workspace-hygiene.json
 .gstack/harness/agents/TEAM.md
 GSTACK_SKILL_REGISTRY.md
 WORKFLOW_RECIPES.md
@@ -88,6 +89,16 @@ If `.gitnexus/meta.json` itself is stale and graph accuracy matters, run:
 ```bash
 node scripts/ai-context-bridge.mjs refresh
 ```
+
+Before review, ship, or commit, check workspace hygiene:
+
+```bash
+.gstack/harness/bin/gstack-harness-workspace-hygiene gate --target .
+```
+
+If the gate is `blocked`, do not continue with commit/release until the staged
+secret, browser profile, runtime artifact, or harness-owned local artifact is
+removed from the staged set or the skip risk is explicitly recorded.
 
 ### 2. Dispatch
 
@@ -127,6 +138,9 @@ docs/*REPORT.md
 .gstack/usage-runs/<run-id>.json
 test output logs
 browser screenshots
+docs/WORKSPACE_HYGIENE_REPORT.md
+.gstack/workspace-hygiene.json
+.gstack/workspace-hygiene-baseline.json
 review findings
 deployment/canary logs
 repeated preference evidence

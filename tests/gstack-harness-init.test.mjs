@@ -42,6 +42,12 @@ test('init renders repeat work promotion state into installed targets', () => {
     scheduled_candidates: [],
     recent_memory_misses: [],
   });
+  assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-workspace-hygiene')), true);
+  assert.match(fs.readFileSync(path.join(target, '.gstack', 'harness', 'agents', 'TEAM.md'), 'utf8'), /Workspace Hygiene Agent/);
+  assert.equal(stateJson.workspace_hygiene.status, 'unknown');
+  assert.equal(stateJson.workspace_hygiene.policy.auto_delete_files, false);
+  assert.equal(stateJson.artifacts.workspace_hygiene_report, 'docs/WORKSPACE_HYGIENE_REPORT.md');
+  assert.match(result.stdout, /"workspace-hygiene"/);
 });
 
 test('init preserves existing repeat work promotion state on reinstall', () => {

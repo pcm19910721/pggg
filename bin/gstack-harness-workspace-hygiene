@@ -1,0 +1,621 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+gstack-harness-workspace-hygiene - classify workspace artifacts and commit risks
+
+Usage:
+  gstack-harness-workspace-hygiene [scan|baseline|delta|gate] [--target DIR] [--json]
+
+Modes:
+  scan      Write docs/WORKSPACE_HYGIENE_REPORT.md and .gstack/workspace-hygiene.json.
+  baseline  Write the current scan plus .gstack/workspace-hygiene-baseline.json.
+  delta     Compare the current scan with the saved baseline.
+  gate      Evaluate staged files for commit safety.
+
+This command is read-only with respect to business code. It writes only harness
+state and reports. It never deletes files, moves files, or applies .gitignore.
+EOF
+}
+
+COMMAND="scan"
+TARGET="."
+PRINT_JSON=0
+
+if [ "$#" -gt 0 ] && [ "${1#--}" = "$1" ]; then
+  COMMAND="$1"
+  shift
+fi
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    scan|baseline|delta|gate)
+      COMMAND="$1"
+      shift
+      ;;
+    --target)
+      TARGET="${2:-}"
+      shift 2
+      ;;
+    --json)
+      PRINT_JSON=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+case "$COMMAND" in
+  scan|baseline|delta|gate) ;;
+  *)
+    echo "ERROR: command must be scan, baseline, delta, or gate" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "ERROR: node is required for workspace hygiene" >&2
+  exit 2
+fi
+
+TARGET_DIR="$(mkdir -p "$TARGET" && cd "$TARGET" && pwd)"
+
+TARGET_DIR="$TARGET_DIR" HYGIENE_COMMAND="$COMMAND" PRINT_JSON="$PRINT_JSON" node <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const { spawnSync } = require('child_process');
+
+const target = process.env.TARGET_DIR;
+const command = process.env.HYGIENE_COMMAND || 'scan';
+const printJson = process.env.PRINT_JSON === '1';
+const now = new Date().toISOString();
+const maxItems = 25;
+const largeFileThreshold = 10 * 1024 * 1024;
+const largeDirectoryThreshold = 100 * 1024 * 1024;
+
+const paths = {
+  report: path.join(target, 'docs', 'WORKSPACE_HYGIENE_REPORT.md'),
+  json: path.join(target, '.gstack', 'workspace-hygiene.json'),
+  baseline: path.join(target, '.gstack', 'workspace-hygiene-baseline.json'),
+  agentJson: path.join(target, 'docs', 'agents', 'workspace-hygiene.json'),
+  state: path.join(target, '.gstack', 'project-state.json'),
+};
+
+const policy = {
+  scan_ignored_files: true,
+  scan_untracked_files: true,
+  scan_modified_files: true,
+  scan_staged_files: true,
+  max_report_items_per_bucket: maxItems,
+  large_file_threshold_mb: 10,
+  large_directory_threshold_mb: 100,
+  secret_risk_blocks_commit: true,
+  browser_profile_blocks_commit: true,
+  generated_runtime_blocks_commit: true,
+  large_asset_blocks_commit: 'ask',
+  auto_apply_gitignore: false,
+  auto_delete_files: false,
+  auto_move_files: false,
+};
+
+function run(bin, args, opts = {}) {
+  const result = spawnSync(bin, args, {
+    cwd: opts.cwd || target,
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  return {
+    ok: result.status === 0,
+    status: result.status,
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+  };
+}
+
+function isGitRepo() {
+  return run('git', ['rev-parse', '--is-inside-work-tree']).ok;
+}
+
+function gitOutput(args) {
+  const result = run('git', args);
+  return result.ok ? result.stdout.trim() : '';
+}
+
+function readJson(file, fallback = null) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+function rel(file) {
+  return path.relative(target, file).split(path.sep).join('/');
+}
+
+function pathHasSegment(filePath, segment) {
+  return filePath === segment || filePath.startsWith(`${segment}/`) || filePath.includes(`/${segment}/`);
+}
+
+function shouldPruneDir(filePath) {
+  const base = path.basename(filePath);
+  return base === '.git' || base === 'node_modules';
+}
+
+function walkFiles(dir, out = []) {
+  let entries = [];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (!shouldPruneDir(full)) walkFiles(full, out);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    let stat;
+    try {
+      stat = fs.statSync(full);
+    } catch {
+      continue;
+    }
+    out.push({
+      path: rel(full),
+      size_bytes: stat.size,
+      mtime: stat.mtime.toISOString(),
+    });
+  }
+  return out;
+}
+
+function directorySizes(files) {
+  const sizes = new Map();
+  for (const file of files) {
+    const parts = file.path.split('/');
+    for (let i = 1; i < parts.length; i += 1) {
+      const dir = parts.slice(0, i).join('/');
+      sizes.set(dir, (sizes.get(dir) || 0) + file.size_bytes);
+    }
+  }
+  return Array.from(sizes.entries())
+    .map(([dir, size]) => ({ path: dir, size_bytes: size }))
+    .filter((item) => item.size_bytes >= largeDirectoryThreshold || item.path.split('/').length <= 2)
+    .sort((a, b) => b.size_bytes - a.size_bytes)
+    .slice(0, maxItems);
+}
+
+function parseStatusLine(line) {
+  const raw = String(line || '').trimEnd();
+  if (!raw) return null;
+  const code = raw.slice(0, 2);
+  const rename = raw.match(/^.. (.+) -> (.+)$/);
+  const filePath = rename ? rename[2] : raw.slice(3).trim();
+  return { code, path: filePath };
+}
+
+function gitStatusMap() {
+  if (!isGitRepo()) return { entries: [], map: new Map(), staged: [] };
+  const status = run('git', ['status', '--short', '--ignored', '--untracked-files=all']);
+  const entries = status.stdout.split(/\r?\n/).map(parseStatusLine).filter(Boolean);
+  const map = new Map();
+  for (const entry of entries) map.set(entry.path, entry.code);
+  const staged = gitOutput(['diff', '--cached', '--name-only']).split(/\r?\n/).filter(Boolean).sort();
+  return { entries, map, staged };
+}
+
+function addUnique(list, item) {
+  const key = JSON.stringify(item);
+  if (!list.some((candidate) => JSON.stringify(candidate) === key)) {
+    list.push(item);
+  }
+}
+
+function isSecretPath(filePath) {
+  const base = path.basename(filePath).toLowerCase();
+  return base === '.env'
+    || base.startsWith('.env.')
+    || base.includes('cookie')
+    || filePath.endsWith('/Cookies')
+    || /\.(sqlite|sqlite3|db|pma)$/i.test(filePath)
+    || /token|credential|secret|keychain/i.test(filePath);
+}
+
+function isBrowserProfilePath(filePath) {
+  return pathHasSegment(filePath, 'chrome-profile')
+    || pathHasSegment(filePath, 'chrome-cdp-profile')
+    || pathHasSegment(filePath, '.playwright-cli');
+}
+
+function isHarnessPath(filePath) {
+  return pathHasSegment(filePath, '.gstack')
+    || pathHasSegment(filePath, '.ai-context')
+    || pathHasSegment(filePath, '.gitnexus')
+    || pathHasSegment(filePath, '.understand-anything')
+    || filePath === 'PROJECT_STATE.md'
+    || filePath === 'docs/FOUNDATION_READINESS_REPORT.md'
+    || filePath === 'docs/CODE_CONTEXT_REPORT.md'
+    || filePath === 'docs/AGENTS_STATUS.md'
+    || filePath.startsWith('docs/agents/');
+}
+
+function isRuntimePath(filePath) {
+  return isBrowserProfilePath(filePath)
+    || pathHasSegment(filePath, 'captures')
+    || pathHasSegment(filePath, 'output')
+    || pathHasSegment(filePath, 'outputs')
+    || pathHasSegment(filePath, 'test-results')
+    || pathHasSegment(filePath, 'playwright-report')
+    || pathHasSegment(filePath, 'artifacts')
+    || pathHasSegment(filePath, 'dist')
+    || pathHasSegment(filePath, 'tmp')
+    || /\.(log|jsonl)$/i.test(filePath);
+}
+
+function isBackupPath(filePath) {
+  return /\.bak-\d{8}-\d{6}$/.test(filePath)
+    || filePath.includes('.bak-')
+    || filePath.endsWith(':Zone.Identifier')
+    || filePath.endsWith('.Zone.Identifier');
+}
+
+function isLargeAsset(file) {
+  return file.size_bytes >= largeFileThreshold
+    || /\.(apk|zip|7z|tar\.gz|tgz|img|exe|bin|doc|docx|pdf|png|jpg|jpeg|webp|tflite)$/i.test(file.path);
+}
+
+function ignorePatternFor(filePath) {
+  if (pathHasSegment(filePath, 'outputs')) return 'outputs/';
+  if (pathHasSegment(filePath, 'output')) return 'output/';
+  if (pathHasSegment(filePath, 'captures')) return 'captures/';
+  if (pathHasSegment(filePath, 'test-results')) return 'test-results/';
+  if (pathHasSegment(filePath, '.playwright-cli')) return '.playwright-cli/';
+  if (pathHasSegment(filePath, 'chrome-profile')) return '**/chrome-profile/';
+  if (pathHasSegment(filePath, 'chrome-cdp-profile')) return '**/chrome-cdp-profile/';
+  if (pathHasSegment(filePath, 'dist')) return '**/dist/';
+  if (pathHasSegment(filePath, 'artifacts')) return '**/artifacts/';
+  if (pathHasSegment(filePath, '.gitnexus')) return '.gitnexus/';
+  if (pathHasSegment(filePath, '.gstack')) return '.gstack/';
+  if (pathHasSegment(filePath, '.ai-context')) return '.ai-context/';
+  if (/\.bak-/.test(filePath)) return '*.bak-*';
+  if (/\.(apk|zip|7z|tar\.gz|tgz|img|exe)$/i.test(filePath)) return `*.${filePath.split('.').pop()}`;
+  return null;
+}
+
+function relocationTarget(filePath) {
+  if (isBrowserProfilePath(filePath) || isRuntimePath(filePath)) return '.gstack/runtime/';
+  if (/\.(apk|zip|7z|tar\.gz|tgz|img|exe|bin)$/i.test(filePath)) return 'artifacts/';
+  if (isLargeAsset({ path: filePath, size_bytes: largeFileThreshold })) return 'artifacts/';
+  return null;
+}
+
+function makeBucket() {
+  return { count: 0, items: [] };
+}
+
+function scanWorkspace() {
+  const git = gitStatusMap();
+  const files = walkFiles(target).sort((a, b) => a.path.localeCompare(b.path));
+  const fileByPath = new Map(files.map((file) => [file.path, file]));
+  const buckets = {
+    source_candidate: makeBucket(),
+    harness_owned: makeBucket(),
+    runtime_artifact: makeBucket(),
+    large_asset: makeBucket(),
+    secret_risk: makeBucket(),
+    backup_noise: makeBucket(),
+    unknown_review: makeBucket(),
+  };
+  const secretRisks = [];
+  const largeAssets = [];
+  const runtimeArtifacts = [];
+  const harnessOwned = [];
+  const backupNoise = [];
+  const ignoreRecommendations = [];
+  const relocationRecommendations = [];
+
+  function addBucket(bucketName, item) {
+    buckets[bucketName].count += 1;
+    if (buckets[bucketName].items.length < maxItems) buckets[bucketName].items.push(item);
+  }
+
+  for (const file of files) {
+    const status = git.map.get(file.path) || '';
+    const item = { ...file, git_status: status };
+    let matched = false;
+
+    if (isSecretPath(file.path)) {
+      const risk = { ...item, reason: 'secret_or_sign_in_state' };
+      addBucket('secret_risk', risk);
+      secretRisks.push(risk);
+      matched = true;
+    }
+    if (isHarnessPath(file.path)) {
+      const risk = { ...item, reason: 'harness_owned_local_artifact' };
+      addBucket('harness_owned', risk);
+      harnessOwned.push(risk);
+      matched = true;
+    }
+    if (isRuntimePath(file.path)) {
+      const risk = { ...item, reason: isBrowserProfilePath(file.path) ? 'browser_or_qa_runtime_artifact' : 'runtime_artifact' };
+      addBucket('runtime_artifact', risk);
+      runtimeArtifacts.push(risk);
+      matched = true;
+    }
+    if (isLargeAsset(file)) {
+      const risk = { ...item, reason: 'large_or_packaged_asset' };
+      addBucket('large_asset', risk);
+      largeAssets.push(risk);
+      matched = true;
+    }
+    if (isBackupPath(file.path)) {
+      const risk = { ...item, reason: 'backup_or_sidecar_noise' };
+      addBucket('backup_noise', risk);
+      backupNoise.push(risk);
+      matched = true;
+    }
+    if (!matched) {
+      addBucket('source_candidate', { ...item, reason: 'source_or_project_content_candidate' });
+    }
+
+    const pattern = ignorePatternFor(file.path);
+    if (pattern) {
+      addUnique(ignoreRecommendations, { pattern, example_path: file.path, reason: 'workspace_hygiene_recommendation' });
+    }
+    const targetDir = relocationTarget(file.path);
+    if (targetDir && !isSecretPath(file.path) && !isHarnessPath(file.path)) {
+      addUnique(relocationRecommendations, { path: file.path, target: targetDir, reason: 'keep_runtime_or_large_artifact_out_of_source_tree' });
+    }
+  }
+
+  const stagedRisks = git.staged
+    .map((filePath) => fileByPath.get(filePath) || { path: filePath, size_bytes: 0, mtime: null, git_status: 'staged' })
+    .map((file) => {
+      const reasons = [];
+      if (isSecretPath(file.path)) reasons.push('secret_risk_staged');
+      if (isBrowserProfilePath(file.path)) reasons.push('browser_profile_staged');
+      else if (isRuntimePath(file.path)) reasons.push('runtime_artifact_staged');
+      if (isHarnessPath(file.path)) reasons.push('harness_artifact_staged');
+      if (isLargeAsset(file)) reasons.push('large_asset_staged');
+      return { ...file, reasons };
+    })
+    .filter((item) => item.reasons.length);
+
+  const blockers = [];
+  const warnings = [];
+  if (stagedRisks.some((item) => item.reasons.includes('secret_risk_staged'))) blockers.push('secret_risk_staged');
+  if (stagedRisks.some((item) => item.reasons.includes('browser_profile_staged'))) blockers.push('browser_profile_staged');
+  if (stagedRisks.some((item) => item.reasons.includes('runtime_artifact_staged'))) blockers.push('runtime_artifact_staged');
+  if (stagedRisks.some((item) => item.reasons.includes('harness_artifact_staged'))) blockers.push('harness_artifact_staged');
+  if (stagedRisks.some((item) => item.reasons.includes('large_asset_staged'))) warnings.push('large_asset_staged');
+  if (secretRisks.length) warnings.push('secret_risk_detected');
+  if (largeAssets.length) warnings.push('large_assets_detected');
+  if (runtimeArtifacts.length) warnings.push('runtime_artifacts_detected');
+
+  const commitGate = blockers.length ? 'blocked' : (warnings.some((warning) => warning.endsWith('_staged')) ? 'warning' : 'pass');
+  const status = blockers.length ? 'blocked' : (warnings.length ? 'warning' : 'pass');
+
+  return {
+    schema: 'gstack-harness.workspace_hygiene.v1',
+    generated_at: now,
+    command,
+    target,
+    git: {
+      inside_work_tree: isGitRepo(),
+      branch: gitOutput(['branch', '--show-current']) || 'unknown',
+      head: gitOutput(['rev-parse', 'HEAD']) || '',
+      staged_files: git.staged,
+      status_count: git.entries.length,
+    },
+    policy,
+    status,
+    report: 'docs/WORKSPACE_HYGIENE_REPORT.md',
+    baseline_path: '.gstack/workspace-hygiene-baseline.json',
+    total_size_bytes: files.reduce((sum, file) => sum + file.size_bytes, 0),
+    file_count: files.length,
+    buckets,
+    largest_dirs: directorySizes(files),
+    secret_risks: secretRisks.slice(0, maxItems),
+    large_assets: largeAssets.sort((a, b) => b.size_bytes - a.size_bytes).slice(0, maxItems),
+    runtime_artifacts: runtimeArtifacts.sort((a, b) => b.size_bytes - a.size_bytes).slice(0, maxItems),
+    harness_owned: harnessOwned.slice(0, maxItems),
+    backup_noise: backupNoise.slice(0, maxItems),
+    ignore_recommendations: ignoreRecommendations,
+    relocation_recommendations: relocationRecommendations.slice(0, maxItems),
+    staged_risks: stagedRisks,
+    commit_gate: commitGate,
+    warnings: Array.from(new Set(warnings)),
+    blockers: Array.from(new Set(blockers)),
+    files: files.map((file) => ({
+      ...file,
+      git_status: git.map.get(file.path) || '',
+    })),
+  };
+}
+
+function deltaFromBaseline(report, baseline) {
+  if (!baseline?.files) {
+    return {
+      status: 'missing_baseline',
+      added_files: 0,
+      added_size_bytes: 0,
+      new_secret_risks: [],
+      new_runtime_artifacts: [],
+      new_large_assets: [],
+    };
+  }
+  const before = new Map(baseline.files.map((file) => [file.path, file]));
+  const added = report.files.filter((file) => !before.has(file.path));
+  const addedPaths = new Set(added.map((file) => file.path));
+  return {
+    status: 'ready',
+    baseline_generated_at: baseline.generated_at,
+    added_files: added.length,
+    added_size_bytes: added.reduce((sum, file) => sum + file.size_bytes, 0),
+    new_secret_risks: report.secret_risks.filter((item) => addedPaths.has(item.path)),
+    new_runtime_artifacts: report.runtime_artifacts.filter((item) => addedPaths.has(item.path)),
+    new_large_assets: report.large_assets.filter((item) => addedPaths.has(item.path)),
+    largest_new_files: added.sort((a, b) => b.size_bytes - a.size_bytes).slice(0, maxItems),
+  };
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes)) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let idx = 0;
+  while (value >= 1024 && idx < units.length - 1) {
+    value /= 1024;
+    idx += 1;
+  }
+  return `${value.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
+function mdItems(items, formatter = (item) => `- ${item.path} (${formatBytes(item.size_bytes || 0)})`) {
+  return items?.length ? items.slice(0, maxItems).map(formatter).join('\n') : 'None';
+}
+
+function renderReport(report) {
+  const delta = report.delta?.status === 'ready'
+    ? `- Added files: ${report.delta.added_files}
+- Added size: ${formatBytes(report.delta.added_size_bytes)}
+- New secret risks: ${report.delta.new_secret_risks.length}
+- New runtime artifacts: ${report.delta.new_runtime_artifacts.length}
+- New large assets: ${report.delta.new_large_assets.length}`
+    : (report.delta ? `- ${report.delta.status}` : 'None');
+
+  return `# Workspace Hygiene Report
+
+Generated: ${report.generated_at}
+Target: ${report.target}
+Git: ${report.git.branch} ${report.git.head || ''}
+Verdict: ${report.status}
+
+## Summary
+
+- Total size: ${formatBytes(report.total_size_bytes)}
+- Files scanned: ${report.file_count}
+- Commit gate: ${report.commit_gate}
+- Blockers: ${report.blockers.length ? report.blockers.join(', ') : 'none'}
+- Warnings: ${report.warnings.length ? report.warnings.join(', ') : 'none'}
+
+## Since Baseline
+
+${delta}
+
+## Buckets
+
+- source_candidate: ${report.buckets.source_candidate.count}
+- harness_owned: ${report.buckets.harness_owned.count}
+- runtime_artifact: ${report.buckets.runtime_artifact.count}
+- large_asset: ${report.buckets.large_asset.count}
+- secret_risk: ${report.buckets.secret_risk.count}
+- backup_noise: ${report.buckets.backup_noise.count}
+- unknown_review: ${report.buckets.unknown_review.count}
+
+## Secret And Sign-In State Risks
+
+${mdItems(report.secret_risks, (item) => `- ${item.path} (${item.reason})`)}
+
+## Large Assets
+
+${mdItems(report.large_assets)}
+
+## Runtime Artifacts
+
+${mdItems(report.runtime_artifacts)}
+
+## Harness-Owned Files
+
+${mdItems(report.harness_owned)}
+
+## Gitignore Recommendations
+
+${mdItems(report.ignore_recommendations, (item) => `- ${item.pattern} (example: ${item.example_path})`)}
+
+## Relocation Recommendations
+
+${mdItems(report.relocation_recommendations, (item) => `- ${item.path} -> ${item.target}`)}
+
+## Commit Gate
+
+- Status: ${report.commit_gate}
+- Staged risks:
+${mdItems(report.staged_risks, (item) => `  - ${item.path}: ${item.reasons.join(', ')}`)}
+
+## Next Actions
+
+- Review secret risks before committing.
+- Review large assets before adding them to Git.
+- Apply .gitignore recommendations only after project owner approval.
+- Move runtime artifacts only after project owner approval.
+`;
+}
+
+function updateProjectState(report) {
+  const state = readJson(paths.state, {});
+  const next = {
+    ...state,
+    workspace_hygiene: {
+      status: report.status,
+      report: 'docs/WORKSPACE_HYGIENE_REPORT.md',
+      baseline_path: '.gstack/workspace-hygiene-baseline.json',
+      total_size_bytes: report.total_size_bytes,
+      growth_since_baseline_bytes: report.delta?.added_size_bytes || 0,
+      buckets: Object.fromEntries(Object.entries(report.buckets).map(([key, value]) => [key, value.count])),
+      largest_dirs: report.largest_dirs,
+      secret_risks: report.secret_risks,
+      large_assets: report.large_assets,
+      ignore_recommendations: report.ignore_recommendations,
+      relocation_recommendations: report.relocation_recommendations,
+      commit_gate: report.commit_gate,
+      policy,
+      warnings: report.warnings,
+      blockers: report.blockers,
+    },
+    artifacts: {
+      ...(state.artifacts || {}),
+      workspace_hygiene_report: 'docs/WORKSPACE_HYGIENE_REPORT.md',
+      workspace_hygiene_json: '.gstack/workspace-hygiene.json',
+      workspace_hygiene_baseline: '.gstack/workspace-hygiene-baseline.json',
+    },
+  };
+  writeJson(paths.state, next);
+}
+
+let report = scanWorkspace();
+if (command === 'delta') {
+  report = { ...report, delta: deltaFromBaseline(report, readJson(paths.baseline, null)) };
+} else if (command === 'baseline') {
+  report = { ...report, baseline_written: true };
+}
+
+writeJson(paths.json, report);
+writeJson(paths.agentJson, report);
+fs.mkdirSync(path.dirname(paths.report), { recursive: true });
+fs.writeFileSync(paths.report, renderReport(report), 'utf8');
+updateProjectState(report);
+if (command === 'baseline') writeJson(paths.baseline, report);
+
+if (printJson) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+else process.stdout.write(`Workspace hygiene ${command}: ${report.status}; commit gate: ${report.commit_gate}\n`);
+
+if (command === 'gate' && report.commit_gate === 'blocked') process.exitCode = 1;
+NODE

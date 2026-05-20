@@ -130,3 +130,39 @@ test('readiness reports gbrain get timeout separately from missing pages', () =>
   assert.equal(output.warnings.includes('gbrain_core_pages_timeout'), true);
   assert.equal(output.next_recommended_agent, 'Problem Handling Agent');
 });
+
+test('readiness includes workspace hygiene status from installed report', () => {
+  const project = tempProject();
+  fs.mkdirSync(path.join(project, '.gstack'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.gstack', 'workspace-hygiene.json'), JSON.stringify({
+    schema: 'gstack-harness.workspace_hygiene.v1',
+    status: 'blocked',
+    commit_gate: 'blocked',
+    blockers: ['secret_risk_staged'],
+    warnings: ['large_asset_staged'],
+    report: 'docs/WORKSPACE_HYGIENE_REPORT.md',
+  }, null, 2));
+
+  const result = spawnSync(readinessBin, [
+    '--target', project,
+    '--mode', 'docs-only',
+    '--skip-code-context',
+    '--json',
+  ], {
+    cwd: root,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      HOME: '/tmp/gstack-readiness-test-home',
+      PATH: '/usr/bin:/bin',
+    },
+  });
+
+  assert.notEqual(result.status, null, result.stderr || result.stdout);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.workspace_hygiene.status, 'blocked');
+  assert.equal(output.workspace_hygiene.commit_gate, 'blocked');
+  const state = JSON.parse(fs.readFileSync(path.join(project, '.gstack', 'project-state.json'), 'utf8'));
+  assert.equal(state.workspace_hygiene.status, 'blocked');
+  assert.equal(state.artifacts.workspace_hygiene_report, 'docs/WORKSPACE_HYGIENE_REPORT.md');
+});

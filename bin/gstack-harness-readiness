@@ -417,6 +417,36 @@ function readCodeContextStatus(state) {
   return state.quality_gates?.code_context || 'missing';
 }
 
+function readWorkspaceHygiene(state) {
+  const reportPath = path.join(target, '.gstack/workspace-hygiene.json');
+  const report = readJson(reportPath, null);
+  const previous = state.workspace_hygiene || {};
+  return {
+    status: report?.status || previous.status || 'unknown',
+    report: report?.report || previous.report || 'docs/WORKSPACE_HYGIENE_REPORT.md',
+    baseline_path: report?.baseline_path || previous.baseline_path || '.gstack/workspace-hygiene-baseline.json',
+    commit_gate: report?.commit_gate || previous.commit_gate || 'unknown',
+    blockers: Array.isArray(report?.blockers) ? report.blockers : (previous.blockers || []),
+    warnings: Array.isArray(report?.warnings) ? report.warnings : (previous.warnings || []),
+    policy: report?.policy || previous.policy || {
+      scan_ignored_files: true,
+      scan_untracked_files: true,
+      scan_modified_files: true,
+      scan_staged_files: true,
+      max_report_items_per_bucket: 25,
+      large_file_threshold_mb: 10,
+      large_directory_threshold_mb: 100,
+      secret_risk_blocks_commit: true,
+      browser_profile_blocks_commit: true,
+      generated_runtime_blocks_commit: true,
+      large_asset_blocks_commit: 'ask',
+      auto_apply_gitignore: false,
+      auto_delete_files: false,
+      auto_move_files: false,
+    },
+  };
+}
+
 function unique(items) {
   return Array.from(new Set(items.filter(Boolean)));
 }
@@ -477,6 +507,7 @@ if (env.GIT_STATUS !== 'ready' && mode === 'app') warnings.push('not_git_repo');
 if (env.BROWSE_STATUS !== 'ready') warnings.push('browse_missing');
 
 const codeContextStatus = readCodeContextStatus(state);
+const workspaceHygiene = readWorkspaceHygiene(state);
 let verdict = 'ready';
 if (blockers.length) verdict = 'blocked';
 else if (
@@ -589,6 +620,7 @@ nextState.quality_gates = {
   code_context: codeContextStatus,
   deployment: deploymentGate,
 };
+nextState.workspace_hygiene = workspaceHygiene;
 nextState.artifacts = {
   ...(state.artifacts || {}),
   foundation_readiness_report: 'docs/FOUNDATION_READINESS_REPORT.md',
@@ -602,6 +634,10 @@ nextState.artifacts = {
   agents_status_report: 'docs/AGENTS_STATUS.md',
   agents_status_dir: 'docs/agents',
   agent_status_runner: '.gstack/harness/bin/gstack-harness-agent-status',
+  workspace_hygiene_report: 'docs/WORKSPACE_HYGIENE_REPORT.md',
+  workspace_hygiene_json: '.gstack/workspace-hygiene.json',
+  workspace_hygiene_baseline: '.gstack/workspace-hygiene-baseline.json',
+  workspace_hygiene_runner: '.gstack/harness/bin/gstack-harness-workspace-hygiene',
 };
 nextState.blockers = unique([...blockers]);
 nextState.warnings = unique([
@@ -635,6 +671,7 @@ Verdict: ${verdict}
 | git state | ${env.GIT_STATUS} | branch: ${env.BRANCH} |
 | runtime | ${runtime.status} | mode: ${mode}; test: ${runtime.test || ''}; dev: ${runtime.dev || ''} |
 | code context | ${codeContextStatus} | docs/CODE_CONTEXT_REPORT.md / .ai-context/gitnexus-status.json |
+| workspace hygiene | ${workspaceHygiene.status} | commit gate: ${workspaceHygiene.commit_gate}; report: ${workspaceHygiene.report} |
 
 ## Blockers
 
@@ -688,6 +725,7 @@ const summary = {
   git: env.GIT_STATUS,
   runtime: runtime.status,
   code_context: codeContextStatus,
+  workspace_hygiene: workspaceHygiene,
   blockers: nextState.blockers,
   warnings: nextState.warnings,
   next_recommended_agent: nextAgent,

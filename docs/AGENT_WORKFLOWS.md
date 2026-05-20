@@ -150,6 +150,54 @@ Problem Handling Agent 不直接修业务功能，除非 Maintenance Agent 已�
 Problem Handling Agent 不改 gstack skill 本体。
 ```
 
+## Workspace Hygiene Agent
+
+Layer: required_core
+
+负责：把安装项目里的源文件、harness 本地产物、QA/runtime 产物、大文件资产、备份噪音和危险提交风险分清楚。
+
+组合：
+
+```text
+读取 git status --short --ignored --untracked-files=all
+→ 扫描目标项目文件大小和目录增长
+→ 按 source_candidate / harness_owned / runtime_artifact / large_asset / secret_risk / backup_noise / unknown_review 分桶
+→ 生成 docs/WORKSPACE_HYGIENE_REPORT.md 和 .gstack/workspace-hygiene.json
+→ baseline 模式记录 QA 前状态到 .gstack/workspace-hygiene-baseline.json
+→ delta 模式报告 QA 后新增文件和增长大小
+→ gate 模式检查 staged 文件，阻断 secret/browser/runtime/harness 本地产物
+```
+
+产出：
+
+```text
+docs/WORKSPACE_HYGIENE_REPORT.md
+.gstack/workspace-hygiene.json
+.gstack/workspace-hygiene-baseline.json
+docs/agents/workspace-hygiene.json
+commit_gate: pass | warning | blocked
+.gitignore recommendations
+relocation recommendations
+```
+
+适用：
+
+```text
+QA / browse / Playwright / device test 后目录明显变大
+git status 被缓存、截图、下载包、备份淹没
+提交前需要确认 staged scope 是否包含 .env、cookie、数据库、浏览器 profile、大文件包
+安装项目需要建立工作区卫生策略
+```
+
+边界：
+
+```text
+Workspace Hygiene Agent 不删除用户文件。
+Workspace Hygiene Agent 不自动修改 .gitignore。
+Workspace Hygiene Agent 不自动移动业务资产。
+Workspace Hygiene Agent 不判断 APK/固件/图片是否一定该删除，只标记为 large_asset 并要求项目策略确认。
+```
+
 ## Code Context Agent
 
 Layer: project_defined
