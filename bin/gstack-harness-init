@@ -803,6 +803,9 @@ copy_file "MEMORY_ARCHITECTURE.md" "MEMORY_ARCHITECTURE.md"
 copy_file "GBRAIN_SCHEMA.md" "GBRAIN_SCHEMA.md"
 copy_file "AGENT_ORCHESTRATOR.md" "docs/AGENT_ORCHESTRATOR.md"
 copy_file "AGENT_WORKFLOWS.md" "docs/AGENT_WORKFLOWS.md"
+copy_file "CLAUDE_MD_TEMPLATE.md" ".gstack/harness/CLAUDE_MD_TEMPLATE.md"
+copy_file "PROJECT_STATE_TEMPLATE.md" ".gstack/harness/PROJECT_STATE_TEMPLATE.md"
+copy_file "bin/gstack-harness-init" ".gstack/harness/bin/gstack-harness-init"
 copy_file "bin/pggg" ".gstack/harness/bin/pggg"
 copy_file "bin/pggg.ps1" ".gstack/harness/bin/pggg.ps1"
 copy_file "bin/pggg.cmd" ".gstack/harness/bin/pggg.cmd"
@@ -823,7 +826,7 @@ copy_file "scripts/gstack-scheduler.mjs" "scripts/gstack-scheduler.mjs"
 copy_file "docs/SCHEDULER_MODEL.md" "docs/SCHEDULER_MODEL.md"
 
 if [ "$DRY_RUN" -ne 1 ]; then
-  chmod +x "$TARGET_DIR/.gstack/harness/bin/pggg" "$TARGET_DIR/.gstack/harness/bin/pcm-harness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-record-run" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-usage-report" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-enable-report-timer" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-schedule" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-workspace-hygiene" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-atomic-commit" "$TARGET_DIR/scripts/ai-context-bridge.mjs" "$TARGET_DIR/scripts/gstack-scheduler.mjs" 2>/dev/null || true
+  chmod +x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-init" "$TARGET_DIR/.gstack/harness/bin/pggg" "$TARGET_DIR/.gstack/harness/bin/pcm-harness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-record-run" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-usage-report" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-enable-report-timer" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-schedule" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-workspace-hygiene" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-atomic-commit" "$TARGET_DIR/scripts/ai-context-bridge.mjs" "$TARGET_DIR/scripts/gstack-scheduler.mjs" 2>/dev/null || true
 fi
 
 AGENT_TEAM_CONTENT="$(cat <<EOF
@@ -1864,7 +1867,7 @@ EOF
 write_file "docs/FOUNDATION_READINESS_REPORT.md" "$READINESS_REPORT"
 
 if [ "$DRY_RUN" -ne 1 ] && [ "$GBRAIN_STATUS" = "ready" ] && [ -f "$TARGET_DIR/scripts/ai-context-bridge.mjs" ] && [ -f "$TARGET_DIR/.ai-context/project.json" ]; then
-  if (cd "$TARGET_DIR" && timeout 90s node scripts/ai-context-bridge.mjs sync-gbrain --page state --page handoff > "$TARGET_DIR/.gstack/sync-gbrain-last.json" 2> "$TARGET_DIR/.gstack/sync-gbrain-last.err"); then
+  if (cd "$TARGET_DIR" && timeout 90s node scripts/ai-context-bridge.mjs sync-gbrain --page overview --page state --page foundation_readiness --page code_context --page quality_gates --page handoff > "$TARGET_DIR/.gstack/sync-gbrain-last.json" 2> "$TARGET_DIR/.gstack/sync-gbrain-last.err"); then
     :
   else
     log "warning: initial gbrain project memory sync skipped or timed out"
@@ -1874,11 +1877,13 @@ fi
 if [ "$DRY_RUN" -ne 1 ] && [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" ]; then
   timeout 45s "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" --target "$TARGET_DIR" --mode "$EFFECTIVE_MODE" > "$TARGET_DIR/.gstack/readiness-last.json" || true
   INITIAL_READINESS="$(node -e 'const fs=require("fs"); try { const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(s.foundation?.readiness || "unknown"); } catch { process.stdout.write("unknown"); }' "$TARGET_DIR/.gstack/project-state.json" 2>/dev/null || printf 'unknown')"
-  if [ "$INITIAL_READINESS" != "ready" ] && [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" ]; then
+  if [ "$INITIAL_READINESS" != "ready" ] && [ "$EFFECTIVE_MODE" != "docs-only" ] && [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" ]; then
     if ! timeout 90s "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" --target "$TARGET_DIR" > "$TARGET_DIR/.gstack/remediation-last.out"; then
       printf 'Foundation remediation command exited non-zero or timed out. Initial readiness: %s\n' "$INITIAL_READINESS" >> "$TARGET_DIR/.gstack/remediation-last.out"
     fi
     timeout 45s "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" --target "$TARGET_DIR" --mode "$EFFECTIVE_MODE" > "$TARGET_DIR/.gstack/readiness-last.json" || true
+  elif [ "$INITIAL_READINESS" != "ready" ] && [ "$EFFECTIVE_MODE" = "docs-only" ]; then
+    :
   else
     printf 'Foundation remediation not run: readiness is ready.\n' > "$TARGET_DIR/.gstack/remediation-last.out"
   fi
@@ -1895,9 +1900,13 @@ if [ "$DRY_RUN" -ne 1 ] && [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-
     NEXT_AGENT="${NEXT_AGENT:-Orchestrator}"
     NEXT_RECIPE="${NEXT_RECIPE:-R0 Restore / Resume Context}"
     if [ "$GBRAIN_STATUS" = "ready" ] && [ -f "$TARGET_DIR/scripts/ai-context-bridge.mjs" ] && [ -f "$TARGET_DIR/.ai-context/project.json" ]; then
-      (cd "$TARGET_DIR" && timeout 90s node scripts/ai-context-bridge.mjs sync-gbrain --page state --page handoff > "$TARGET_DIR/.gstack/sync-gbrain-last.json" 2> "$TARGET_DIR/.gstack/sync-gbrain-last.err") || true
+      (cd "$TARGET_DIR" && timeout 90s node scripts/ai-context-bridge.mjs sync-gbrain --page overview --page state --page foundation_readiness --page code_context --page quality_gates --page handoff > "$TARGET_DIR/.gstack/sync-gbrain-last.json" 2> "$TARGET_DIR/.gstack/sync-gbrain-last.err") || true
     fi
   fi
+fi
+
+if [ "$DRY_RUN" -ne 1 ] && [ "$EFFECTIVE_MODE" = "docs-only" ] && [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" ]; then
+  "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" --target "$TARGET_DIR" --event harness_init >/dev/null 2>&1 || true
 fi
 
 CODEX_START_PROMPT="$(cat <<EOF

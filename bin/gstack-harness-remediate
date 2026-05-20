@@ -242,6 +242,7 @@ ensure_dir "docs"
 ensure_dir "scripts"
 
 copy_from_template_if_missing "scripts/ai-context-bridge.mjs" "scripts/ai-context-bridge.mjs"
+copy_from_template_if_missing "bin/gstack-harness-init" ".gstack/harness/bin/gstack-harness-init"
 copy_from_template_if_missing "bin/gstack-harness-record-run" ".gstack/harness/bin/gstack-harness-record-run"
 copy_from_template_if_missing "bin/gstack-harness-readiness" ".gstack/harness/bin/gstack-harness-readiness"
 copy_from_template_if_missing "bin/gstack-harness-atomic-commit" ".gstack/harness/bin/gstack-harness-atomic-commit"
