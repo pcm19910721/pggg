@@ -58,6 +58,7 @@ test('init renders repeat work promotion state into installed targets', () => {
     },
   });
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-workspace-hygiene')), true);
+  assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-atomic-commit')), true);
   assert.match(fs.readFileSync(path.join(target, '.gstack', 'harness', 'agents', 'TEAM.md'), 'utf8'), /Workspace Hygiene Agent/);
   assert.equal(stateJson.workspace_hygiene.status, 'unknown');
   assert.equal(stateJson.workspace_hygiene.policy.auto_delete_files, false);
@@ -120,4 +121,43 @@ test('init preserves existing repeat work promotion state on reinstall', () => {
 
   const updated = JSON.parse(fs.readFileSync(statePath, 'utf8'));
   assert.deepEqual(updated.repeat_work, existing.repeat_work);
+});
+
+test('installed remediation restores missing atomic commit runner', () => {
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-init-remediate-atomic-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-init-home-'));
+  const env = {
+    ...process.env,
+    HOME: home,
+    PATH: '/usr/bin:/bin',
+  };
+
+  const installed = spawnSync(initBin, [
+    '--target', target,
+    '--mode', 'docs-only',
+    '--no-start-codex',
+  ], {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: 100_000,
+    env,
+  });
+  assert.notEqual(installed.status, null, installed.stderr || installed.stdout);
+
+  const atomicRunner = path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-atomic-commit');
+  fs.rmSync(atomicRunner);
+
+  const remediation = spawnSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-remediate'), [
+    '--target', target,
+    '--skip-code-context',
+  ], {
+    cwd: target,
+    encoding: 'utf8',
+    timeout: 100_000,
+    env,
+  });
+
+  assert.equal(remediation.status, 0, remediation.stderr || remediation.stdout);
+  assert.equal(fs.existsSync(atomicRunner), true);
+  assert.equal(fs.statSync(atomicRunner).mode & 0o111, 0o111);
 });
