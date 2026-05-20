@@ -8,6 +8,7 @@ const SWARM_FILE = 'swarm.json';
 const AGENTS_FILE = 'agents.json';
 const TASKS_FILE = 'tasks.json';
 const QUEUES_FILE = 'queues.json';
+const HANDOFFS_DIR = 'handoffs';
 
 const DOMAINS = ['queen', 'foundation', 'memory', 'code-context', 'core', 'integration', 'support', 'release'];
 
@@ -58,6 +59,10 @@ const PRIORITY_WEIGHT = {
 
 function schedulerPath(projectDir, file) {
   return path.join(projectDir, SCHEDULER_DIR, file);
+}
+
+function handoffPath(projectDir, taskId, ext) {
+  return path.join(projectDir, SCHEDULER_DIR, HANDOFFS_DIR, `${taskId}.${ext}`);
 }
 
 function ensureSchedulerDir(projectDir) {
@@ -218,6 +223,89 @@ function saveSchedulerState(projectDir, state) {
   writeJson(schedulerPath(projectDir, AGENTS_FILE), state.agents);
   writeJson(schedulerPath(projectDir, TASKS_FILE), state.tasks);
   writeJson(schedulerPath(projectDir, QUEUES_FILE), state.queues);
+}
+
+function writeTaskHandoff(projectDir, task, analysis, primaryAgent = null) {
+  const handoff = {
+    schema: 'gstack-harness.scheduler_handoff.v1',
+    task_id: task.taskId,
+    description: task.description,
+    status: task.status,
+    recipe: defaultRecipeForTask(task),
+    primary_agent: primaryAgent,
+    required_capabilities: analysis.requiredCapabilities || [],
+    required_evidence: task.evidenceRequired || [],
+    allowed_writes: defaultAllowedWritesForTask(task),
+    suggested_commands: suggestedCommandsForTask(task),
+    completion_contract: {
+      complete: `gstack-harness-schedule complete-task --target . --task-id ${task.taskId} --status completed --evidence <paths> --result "<summary>"`,
+      fail: `gstack-harness-schedule complete-task --target . --task-id ${task.taskId} --status failed --result "<reason>"`,
+    },
+    generated_at: nowIso(),
+  };
+  writeJson(handoffPath(projectDir, task.taskId, 'json'), handoff);
+  fs.mkdirSync(path.dirname(handoffPath(projectDir, task.taskId, 'md')), { recursive: true });
+  fs.writeFileSync(handoffPath(projectDir, task.taskId, 'md'), renderTaskHandoffMarkdown(handoff));
+  return {
+    json: path.relative(projectDir, handoffPath(projectDir, task.taskId, 'json')),
+    markdown: path.relative(projectDir, handoffPath(projectDir, task.taskId, 'md')),
+  };
+}
+
+function defaultRecipeForTask(task) {
+  if (task.type === 'coding') return 'R4 Scoped Coding Task';
+  if (task.type === 'testing') return 'R5 Verification / Reality Test';
+  if (task.type === 'review') return 'R8 Review';
+  if (task.type === 'release') return 'R10 Release Readiness';
+  return 'custom';
+}
+
+function defaultAllowedWritesForTask(task) {
+  if (task.type === 'coding') return ['targeted source files', 'targeted tests', 'task evidence artifacts'];
+  if (task.type === 'testing') return ['test evidence artifacts', 'QA reports'];
+  if (task.type === 'documentation') return ['documentation files'];
+  return ['task evidence artifacts'];
+}
+
+function suggestedCommandsForTask(task) {
+  if (task.type === 'coding') {
+    return [
+      'node scripts/ai-context-bridge.mjs baseline',
+      'node scripts/ai-context-bridge.mjs status',
+      'run targeted tests',
+      'node scripts/ai-context-bridge.mjs postchange --scope all --test-command "<command>" --test-exit-code <code> --test-artifact "<path>"',
+    ];
+  }
+  return ['capture file-backed evidence before completion'];
+}
+
+function renderTaskHandoffMarkdown(handoff) {
+  return `# Scheduler Handoff: ${handoff.task_id}
+
+Status: ${handoff.status}
+Recipe: ${handoff.recipe}
+
+## Task
+
+${handoff.description || '(no description)'}
+
+## Primary Agent
+
+${handoff.primary_agent ? `${handoff.primary_agent.agentId} (${handoff.primary_agent.domain})` : 'Unassigned'}
+
+## Required Evidence
+
+${handoff.required_evidence.map((item) => `- ${item}`).join('\n') || '- summary'}
+
+## Suggested Commands
+
+${handoff.suggested_commands.map((item) => `- ${item}`).join('\n')}
+
+## Completion
+
+- Complete: \`${handoff.completion_contract.complete}\`
+- Fail: \`${handoff.completion_contract.fail}\`
+`;
 }
 
 export function registerAgent(projectDir = process.cwd(), agentInput) {
@@ -402,7 +490,7 @@ export function scoreAgent(agent, taskInput, analysis = analyzeTask(taskInput)) 
 
 function calculateCapabilityScore(agent, task, requiredCapabilities) {
   let score = 0.35;
-  if (agent.domain === (TYPE_DOMAIN[task.type] || 'core')) score += 0.2;
+  if (agent.domain === (TYPE_DOMAIN[task.type] || 'core')) score += 0.3;
   const agentCaps = new Set(agent.capabilities || []);
   const matches = requiredCapabilities.filter((cap) => agentCaps.has(cap)).length;
   score += Math.min(0.4, matches * 0.12);
@@ -428,6 +516,8 @@ export function scheduleTask(projectDir = process.cwd(), taskInput) {
     if (!queue.includes(task.taskId)) queue.push(task.taskId);
     state.swarm.updatedAt = nowIso();
     saveSchedulerState(projectDir, state);
+    task.handoff = writeTaskHandoff(projectDir, task, analysis, null);
+    saveSchedulerState(projectDir, state);
     return {
       status: 'queued',
       task,
@@ -452,6 +542,13 @@ export function scheduleTask(projectDir = process.cwd(), taskInput) {
   };
   state.swarm.updatedAt = nowIso();
   saveSchedulerState(projectDir, state);
+  task.handoff = writeTaskHandoff(projectDir, task, analysis, {
+    agentId: best.agent.agentId,
+    domain: best.agent.domain,
+    score: best.score.totalScore,
+  });
+  state.tasks.tasks[task.taskId] = task;
+  saveSchedulerState(projectDir, state);
   return {
     status: 'assigned',
     task,
@@ -466,6 +563,107 @@ export function scheduleTask(projectDir = process.cwd(), taskInput) {
       .slice(0, 2)
       .map(({ agent, score }) => ({ agentId: agent.agentId, domain: agent.domain, score: score.totalScore })),
     agentScores: candidateScores.map((item) => item.score),
+  };
+}
+
+function assignQueuedTask(projectDir, state, agent, task, domain) {
+  task.status = 'assigned';
+  task.assignedTo = agent.agentId;
+  task.startedAt = task.startedAt || nowIso();
+  task.updatedAt = nowIso();
+  task.handoff = writeTaskHandoff(projectDir, task, task.analysis || analyzeTask(task), {
+    agentId: agent.agentId,
+    domain: agent.domain,
+  });
+  state.tasks.tasks[task.taskId] = task;
+  state.agents.agents[agent.agentId] = {
+    ...agent,
+    status: 'busy',
+    currentTask: task.taskId,
+    workload: Math.min(1, Number(agent.workload || 0) + 0.35),
+    updatedAt: nowIso(),
+  };
+  const queue = state.queues.queues[domain] ||= [];
+  state.queues.queues[domain] = queue.filter((taskId) => taskId !== task.taskId);
+  state.swarm.updatedAt = nowIso();
+}
+
+export function claimNextTask(projectDir = process.cwd(), input = {}) {
+  const state = loadSchedulerState(projectDir);
+  const agent = state.agents.agents[input.agentId];
+  if (!agent) {
+    throw new Error(`Unknown agent: ${input.agentId}`);
+  }
+  if (agent.status !== 'idle') {
+    return { status: 'unavailable', reason: `agent_status_${agent.status}`, task: null, agent };
+  }
+
+  const domain = input.domain || agent.domain;
+  const queue = state.queues.queues[domain] ||= [];
+  const taskId = queue.find((candidate) => state.tasks.tasks[candidate]?.status === 'queued');
+  if (!taskId) {
+    return { status: 'empty', queuedDomain: domain, task: null, agent };
+  }
+
+  const task = state.tasks.tasks[taskId];
+  assignQueuedTask(projectDir, state, agent, task, domain);
+  saveSchedulerState(projectDir, state);
+  return {
+    status: 'assigned',
+    task: state.tasks.tasks[taskId],
+    primaryAgent: {
+      agentId: agent.agentId,
+      domain: agent.domain,
+    },
+  };
+}
+
+export function completeTask(projectDir = process.cwd(), input = {}) {
+  const state = loadSchedulerState(projectDir);
+  const task = state.tasks.tasks[input.taskId];
+  if (!task) {
+    throw new Error(`Unknown task: ${input.taskId}`);
+  }
+  const finalStatus = input.status || 'completed';
+  task.status = finalStatus;
+  task.result = input.result || task.result || null;
+  task.evidence = input.evidence || task.evidence || [];
+  task.completedAt = nowIso();
+  task.updatedAt = nowIso();
+  state.tasks.tasks[task.taskId] = task;
+
+  if (task.assignedTo && state.agents.agents[task.assignedTo]) {
+    const agent = state.agents.agents[task.assignedTo];
+    const releasedAgent = {
+      ...agent,
+      status: 'idle',
+      currentTask: null,
+      workload: 0,
+      taskCount: Number(agent.taskCount || 0) + 1,
+      updatedAt: nowIso(),
+    };
+    state.agents.agents[task.assignedTo] = releasedAgent;
+    if (input.promoteNext) {
+      const domain = input.domain || releasedAgent.domain;
+      const queue = state.queues.queues[domain] ||= [];
+      const nextTaskId = queue.find((candidate) => state.tasks.tasks[candidate]?.status === 'queued');
+      if (nextTaskId) {
+        assignQueuedTask(projectDir, state, releasedAgent, state.tasks.tasks[nextTaskId], domain);
+      }
+    }
+  }
+
+  state.swarm.updatedAt = nowIso();
+  saveSchedulerState(projectDir, state);
+  const promoted = task.assignedTo ? Object.values(state.tasks.tasks).find((candidate) => (
+    candidate.assignedTo === task.assignedTo &&
+    candidate.status === 'assigned' &&
+    candidate.taskId !== task.taskId
+  )) : null;
+  return {
+    status: finalStatus,
+    task,
+    ...(promoted ? { promoted: { status: 'assigned', task: promoted } } : {}),
   };
 }
 
@@ -499,6 +697,8 @@ function usage() {
   register-agent --target DIR --agent-id ID --role ROLE --domain DOMAIN --capabilities a,b,c
   analyze --target DIR --type coding --priority high --description TEXT
   schedule --target DIR --task-id ID --type coding --priority normal --description TEXT
+  claim-next --target DIR --agent-id ID [--domain DOMAIN]
+  complete-task --target DIR --task-id ID [--status completed] [--result TEXT] [--evidence a,b,c] [--promote-next]
   status [--target DIR]
 `);
 }
@@ -540,6 +740,23 @@ export function main(argv = process.argv.slice(2)) {
       type: args.type,
       priority: args.priority,
       description: args.description,
+    }));
+    return;
+  }
+  if (command === 'claim-next') {
+    print(claimNextTask(target, {
+      agentId: args['agent-id'],
+      domain: args.domain,
+    }));
+    return;
+  }
+  if (command === 'complete-task') {
+    print(completeTask(target, {
+      taskId: args['task-id'],
+      status: args.status,
+      result: args.result,
+      evidence: args.evidence ? String(args.evidence).split(',').map((item) => item.trim()).filter(Boolean) : [],
+      promoteNext: Boolean(args['promote-next']),
     }));
     return;
   }

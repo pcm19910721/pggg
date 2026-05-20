@@ -93,6 +93,15 @@ test('scheduleTask chooses the best available agent using capability, load, hist
   const state = loadSchedulerState(project);
   assert.equal(state.agents.agents['agent-good-coder'].status, 'busy');
   assert.equal(state.tasks.tasks['task-1'].status, 'assigned');
+
+  const handoffJson = path.join(project, '.gstack', 'scheduler', 'handoffs', 'task-1.json');
+  const handoffMd = path.join(project, '.gstack', 'scheduler', 'handoffs', 'task-1.md');
+  assert.equal(fs.existsSync(handoffJson), true);
+  assert.equal(fs.existsSync(handoffMd), true);
+  const handoff = JSON.parse(fs.readFileSync(handoffJson, 'utf8'));
+  assert.equal(handoff.task_id, 'task-1');
+  assert.equal(handoff.primary_agent.agentId, 'agent-good-coder');
+  assert.deepEqual(handoff.required_evidence, ['diff', 'test', 'review']);
 });
 
 test('scheduleTask queues work when no agent is available in the recommended domain', () => {
@@ -198,4 +207,51 @@ test('completeTask records task evidence and releases the assigned agent', () =>
   assert.equal(state.agents.agents['agent-good-coder'].currentTask, null);
   assert.equal(state.agents.agents['agent-good-coder'].taskCount, 1);
   assert.equal(state.agents.agents['agent-good-coder'].workload, 0);
+});
+
+test('completeTask can promote queued work to the released agent', () => {
+  const project = tempProject();
+  initializeScheduler(project, { topology: 'hierarchical-mesh', maxAgents: 3 });
+  registerAgent(project, {
+    agentId: 'agent-good-coder',
+    role: 'Build Agent',
+    domain: 'integration',
+    capabilities: ['coding', 'implementation'],
+    status: 'idle',
+    workload: 0,
+    health: 1,
+    successRate: 0.9,
+    averageDurationMs: 1000,
+  });
+  scheduleTask(project, {
+    taskId: 'task-1',
+    type: 'coding',
+    priority: 'normal',
+    description: 'Implement a small parser.',
+  });
+  scheduleTask(project, {
+    taskId: 'task-2',
+    type: 'coding',
+    priority: 'normal',
+    description: 'Implement a small formatter.',
+  });
+
+  const result = completeTask(project, {
+    taskId: 'task-1',
+    status: 'completed',
+    result: 'Parser implemented.',
+    evidence: ['diff', 'test'],
+    promoteNext: true,
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(result.promoted.task.taskId, 'task-2');
+  assert.equal(result.promoted.task.assignedTo, 'agent-good-coder');
+
+  const state = loadSchedulerState(project);
+  assert.equal(state.tasks.tasks['task-1'].status, 'completed');
+  assert.equal(state.tasks.tasks['task-2'].status, 'assigned');
+  assert.equal(state.agents.agents['agent-good-coder'].status, 'busy');
+  assert.equal(state.agents.agents['agent-good-coder'].currentTask, 'task-2');
+  assert.deepEqual(state.queues.queues.integration, []);
 });
