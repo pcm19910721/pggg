@@ -45,6 +45,7 @@ writes:
     - docs/agents/orchestrator.json
   artifacts:
     - .gstack/usage-runs/
+    - session interaction context evidence
     - repeat-work promotion notes
 quality_gates:
   supports:

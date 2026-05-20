@@ -34,6 +34,18 @@ test('init renders repeat work promotion state into installed targets', () => {
   assert.match(projectState, /- Promotion backlog:/);
   assert.match(projectState, /- Scheduled candidates:/);
   assert.match(projectState, /- Recent memory misses:/);
+  assert.match(projectState, /## Session Interaction Context/);
+  assert.match(projectState, /- Recent interaction evidence:/);
+  assert.match(projectState, /- Current user message summary:/);
+  assert.match(projectState, /- Previous Codex output summary:/);
+  assert.match(projectState, /- Previous two Codex output summary:/);
+
+  const claudeMd = fs.readFileSync(path.join(target, 'CLAUDE.md'), 'utf8');
+  assert.match(claudeMd, /Session interaction context:/);
+  assert.match(claudeMd, /recent 1-2 Codex outputs in the same session/);
+
+  const codexPrompt = fs.readFileSync(path.join(target, 'docs', 'CODEX_START_PROMPT.md'), 'utf8');
+  assert.match(codexPrompt, /同一个 session 内最近 1-2 次 Codex 输出/);
 
   const stateJson = JSON.parse(fs.readFileSync(path.join(target, '.gstack', 'project-state.json'), 'utf8'));
   assert.deepEqual(stateJson.repeat_work, {
@@ -41,6 +53,9 @@ test('init renders repeat work promotion state into installed targets', () => {
     promotion_backlog: [],
     scheduled_candidates: [],
     recent_memory_misses: [],
+    interaction_context: {
+      recent_evidence: [],
+    },
   });
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-workspace-hygiene')), true);
   assert.match(fs.readFileSync(path.join(target, '.gstack', 'harness', 'agents', 'TEAM.md'), 'utf8'), /Workspace Hygiene Agent/);
@@ -78,6 +93,16 @@ test('init preserves existing repeat work promotion state on reinstall', () => {
     promotion_backlog: [{ pattern_id: 'weekly-report', promotion_type: 'scheduled_candidate' }],
     scheduled_candidates: [{ pattern_id: 'weekly-report', cadence: 'weekly' }],
     recent_memory_misses: [{ pattern_id: 'release-notes', observed_in: 'manual-test' }],
+    interaction_context: {
+      recent_evidence: [{
+        current_user_message_summary: '用户要求按上次报告格式继续',
+        previous_codex_output_summary: 'Codex 提供了报告格式',
+        previous_2_codex_output_summary: '',
+        user_message_role: 'confirmation',
+        inferred_delta: '复用已有格式',
+        durable_candidate: false,
+      }],
+    },
   };
   fs.writeFileSync(statePath, `${JSON.stringify(existing, null, 2)}\n`);
 

@@ -27,7 +27,7 @@
 | 派发问题处理 | warning、timeout、runner failure、反复卡点交给 Problem Handling Agent |
 | 派发工作区卫生检查 | QA/test 后、提交前、大量文件变化时交给 Workspace Hygiene Agent |
 | 维护状态文件 | 更新 `PROJECT_STATE.md` 或 `.gstack/project-state.json` |
-| 判断用户意图 | 识别“测一下”“继续做”“准备上线”“这个报错了”等意图 |
+| 判断用户意图 | 先结合同一 session 最近 1-2 次 Codex 输出，再识别“测一下”“继续做”“准备上线”“这个报错了”等意图 |
 | 派发任务 | 按 recipe 调用对应 gstack skills，比如 QA、Review、Release |
 | 检查前置条件 | 例如没跑 QA 就不建议 ship，没部署配置就先 setup-deploy |
 | 汇总结果 | 每个 skill 做完后收集 artifact 和 evidence，再更新项目状态 |
@@ -52,15 +52,16 @@
 14. 检查 .ai-context/project.json / GitNexus status 是否存在和是否适用于本轮任务；UA artifacts 只在 dashboard/onboarding/domain/fallback 时检查
 15. 检查 Workspace Hygiene 状态；提交/ship/review 前必须确认 commit gate
 16. 检查 Foundation Readiness；如果未知、partial 或 blocked，先走 R-1 / R-0.5
-17. 判断用户输入类型
-18. 检查当前阶段和质量门禁
-19. 解决 gbrain 与本地文档冲突，默认以 gbrain 为准
-20. 选择 workflow recipe 和一个或多个 gstack skills
-21. 生成明确交接任务
-22. gstack skills 执行
-23. 总控 Agent 汇总 artifact/evidence 并更新 PROJECT_STATE.md
-24. 记录 system tuning notes：误路由、能力缺口、交接失败、需要新增或优化的 Agent
-25. 按 GBRAIN_SCHEMA.md 将长期有价值的结论写入 gbrain
+17. 将用户当前输入与同一 session 最近 1-2 次 Codex 输出进行对照
+18. 判断用户输入类型：确认、纠正、补充需求、改变方向、指出缺失上下文、升级信号或普通任务
+19. 检查当前阶段和质量门禁
+20. 解决 gbrain 与本地文档冲突，默认以 gbrain 为准
+21. 选择 workflow recipe 和一个或多个 gstack skills
+22. 生成明确交接任务
+23. gstack skills 执行
+24. 总控 Agent 汇总 artifact/evidence 并更新 PROJECT_STATE.md
+25. 记录 system tuning notes：误路由、能力缺口、交接失败、需要新增或优化的 Agent
+26. 按 GBRAIN_SCHEMA.md 将长期有价值的结论写入 gbrain
 ```
 
 ## 路由规则

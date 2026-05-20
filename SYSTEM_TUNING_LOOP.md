@@ -274,6 +274,7 @@ discovery -> reuse_required -> promotion_candidate -> approved_protocol
 - 第二次出现：必须先复用已知偏好，再询问缺失信息。
 - 第三到第十次稳定出现：生成 promotion candidate。
 - 第二次仍要求用户重复同一偏好：记为 system tuning failure。
+- 判断用户当前话语时，必须先结合同一 session 最近 1-2 次 Codex 输出；如果用户是在纠正上一次输出却被当成独立新需求，记为 system tuning failure。
 
 常见触发信号：
 
@@ -362,6 +363,13 @@ agents_used:
 skills_used:
 where_it_stalled:
 user_correction:
+session_interaction_context:
+  current_user_message_summary:
+  previous_codex_output_summary:
+  previous_2_codex_output_summary:
+  user_message_role:
+  inferred_delta:
+  durable_candidate:
 missing_context:
 bad_handoff:
 gate_issue:

@@ -20,6 +20,12 @@ Repeat work promotion:
 - Promote stable repetition to a handoff rule, workflow recipe, agent capability, scheduled candidate, capability gap, or possible new skill, in that order.
 - Do not silently enable recurring work. Recurrence requires explicit cadence, permissions, output artifact, failure handling, monitoring path, and user approval.
 
+Session interaction context:
+
+- When classifying the user's current message, compare it with the recent 1-2 Codex outputs in the same session.
+- Use that comparison to decide whether the user is confirming, correcting, adding a requirement delta, changing direction, naming missing context, or giving a promotion signal.
+- If the comparison matters for durable memory, record only a concise interaction summary and inferred delta. Do not store full transcript text as durable memory.
+
 gbrain is the canonical long-term memory source. If gbrain conflicts with local memory docs, prefer gbrain and update the stale docs.
 When writing durable memory, follow `GBRAIN_SCHEMA.md`.
 
@@ -53,7 +59,7 @@ Before doing substantial work:
 15. Read `docs/AGENT_ORCHESTRATOR.md`.
 16. Read `docs/AGENT_WORKFLOWS.md`.
 17. Check Foundation Readiness. If readiness is unknown, partial, or blocked, run the Foundation Readiness / Remediation workflow before business work.
-18. Classify the user's request.
+18. Compare the user's current message with the recent 1-2 Codex outputs in this same session, then classify the request.
 19. Choose the appropriate workflow recipe and gstack skills.
 20. After completing work, update `PROJECT_STATE.md` and `.gstack/project-state.json` with artifact/evidence references and system tuning notes.
 21. Write durable project/agent/system learnings to gbrain using `GBRAIN_SCHEMA.md`.
@@ -110,6 +116,7 @@ Problem handling rule:
 读取 PROJECT_STATE.md、.gstack/project-state.json、.gstack/harness/agents/TEAM.md、.gstack/harness/agents/problem-handling.md、docs/PROBLEM_HANDLING_REPORT.md、docs/SYSTEM_TUNING_REPORT.md、docs/CODE_CONTEXT_REPORT.md、.ai-context/project.json、HARNESS_PRODUCT_USAGE.md、GSTACK_SKILL_REGISTRY.md、WORKFLOW_RECIPES.md、ORCHESTRATOR_RUNBOOK.md、SYSTEM_TUNING_LOOP.md、MEMORY_ARCHITECTURE.md、GBRAIN_SCHEMA.md、docs/AGENT_ORCHESTRATOR.md、docs/AGENT_WORKFLOWS.md。已有代码项目在 /office-hours、实现、review 或事故定位前优先走 Code Context Agent：先 `node scripts/ai-context-bridge.mjs status`，图谱 stale 且需要准确影响面时再 refresh；UA 只作为 dashboard/onboarding/domain/fallback 增强。
 以后在这个项目中按项目总控 Agent 的方式工作：
 先查询相关 gbrain 记忆，再判断项目状态。如果 gbrain query 遇到 PGLite lock / timeout，重试一次，仍失败就派发 Problem Handling Agent，记录 warning，并只在低风险流程里用本地状态继续。如果 gbrain 和本地文档冲突，以 gbrain 为准。然后选择 workflow recipe 和 gstack skills，完成后用 evidence 更新 PROJECT_STATE.md 和 .gstack/project-state.json，并运行 .gstack/harness/bin/gstack-harness-record-run 记录 usage run，带上系统运行卡点、用户纠正和 Agent 能力缺口。
+判断用户当前话语时，先结合同一个 session 内最近 1-2 次 Codex 输出，区分确认、纠正、补充需求、改变方向、指出缺失上下文或升级信号；需要长期沉淀时只记录摘要和 inferred delta，不保存完整 transcript。
 如果用户表达“按上次”“还是那个格式”“以后都这样”或任何周期性任务，先查 usage runs、tuning notes、gbrain/project memory 和 recipes，复用已知偏好后再提问。第二次还要求用户重复同一格式、字段、流程或周期时，记录为 system tuning failure，并提出 handoff rule、workflow recipe、agent capability、scheduled candidate、capability gap 或 possible new skill 的升级建议。
 ```
 

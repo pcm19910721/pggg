@@ -123,6 +123,14 @@
 - Scheduled candidates:
 - Recent memory misses:
 
+## Session Interaction Context
+
+- Recent interaction evidence:
+- Current user message summary:
+- Previous Codex output summary:
+- Previous two Codex output summary:
+- Inferred delta:
+
 ## Notes
 
 - ...
@@ -230,7 +238,10 @@
     "known_patterns": [],
     "promotion_backlog": [],
     "scheduled_candidates": [],
-    "recent_memory_misses": []
+    "recent_memory_misses": [],
+    "interaction_context": {
+      "recent_evidence": []
+    }
   },
   "blockers": [],
   "next_recommended_action": {

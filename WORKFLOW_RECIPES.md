@@ -1298,6 +1298,7 @@ Notes: target OS, runner, evidence path
 用户说“按上次”“还是那个格式”“以后都这样”
 同类任务第二次或多次出现
 用户重复纠正同一字段、格式、流程或交接偏好
+用户当前话语需要结合同一 session 最近 1-2 次 Codex 输出才能判断是确认、纠正、补充需求还是改变方向
 任务出现明确周期：每天、每周、每月、每个发布前
 usage runs / tuning notes 显示同一 where_stalled、user_correction 或 capability_gap 反复出现
 ```
@@ -1315,6 +1316,7 @@ usage runs / tuning notes 显示同一 where_stalled、user_correction 或 capab
 
 ```text
 按原本业务 recipe 完成当前任务
+→ 对照同一 session 最近 1-2 次 Codex 输出，提取当前用户话语的 role 和 inferred delta
 → 检查 .gstack/usage-runs/index.jsonl 和相关 run JSON
 → 检查 docs/USAGE_FEEDBACK_REPORT.md、docs/SYSTEM_TUNING_REPORT.md
 → 查询 gbrain project / agent memory（可用时）
@@ -1362,6 +1364,7 @@ approved_by:
 ```text
 当前任务 artifact
 repeat work promotion note
+session interaction context evidence
 memory miss note（如有）
 scheduled candidate（如适用）
 system tuning failure（如适用）

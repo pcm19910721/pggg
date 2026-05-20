@@ -144,6 +144,7 @@ docs/WORKSPACE_HYGIENE_REPORT.md
 review findings
 deployment/canary logs
 repeated preference evidence
+session interaction context evidence
 memory miss notes
 repeat-work promotion candidates
 scheduled candidates awaiting approval
@@ -187,6 +188,7 @@ gate:
 ### 6. Memory
 
 Stable conclusions are synced to gbrain. Raw code graphs and full generated artifacts stay local.
+For same-session interaction context, sync only concise summaries and inferred deltas. Do not store full transcript text as durable memory.
 
 Preferred command:
 

@@ -48,6 +48,7 @@ This project is indexed by GitNexus as **gstack-multiagent** (977 symbols, 1581 
 - Treat repeated user instructions as system evidence, not chat trivia.
 - First occurrence is discovery; second occurrence must reuse known preferences before asking again.
 - If the user has to repeat the same format, field list, workflow, or schedule twice, record it as a system tuning failure.
+- When classifying a user's current message in the same session, compare it with the most recent 1-2 Codex outputs before deciding whether it is a confirmation, correction, requirement delta, direction change, missing-context signal, or promotion signal.
 - Promote stable repeated work in this order: handoff rule, workflow recipe, agent capability, scheduled candidate, capability gap, possible new skill.
 - Do not silently enable recurring work. Create a scheduled candidate until cadence, permissions, outputs, failure handling, monitoring, and user approval are explicit.
 

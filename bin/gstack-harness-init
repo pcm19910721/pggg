@@ -1288,6 +1288,14 @@ $WARNING_TEXT
 - Scheduled candidates:
 - Recent memory misses:
 
+## Session Interaction Context
+
+- Recent interaction evidence:
+- Current user message summary:
+- Previous Codex output summary:
+- Previous two Codex output summary:
+- Inferred delta:
+
 ## Notes
 
 - Installed from template source: $TEMPLATE_ROOT
@@ -1702,7 +1710,10 @@ PROJECT_STATE_JSON="$(cat <<EOF
     "known_patterns": [],
     "promotion_backlog": [],
     "scheduled_candidates": [],
-    "recent_memory_misses": []
+    "recent_memory_misses": [],
+    "interaction_context": {
+      "recent_evidence": []
+    }
   },
   "blockers": $(json_array "${BLOCKERS[@]}"),
   "warnings": $(json_array "${WARNINGS[@]}"),
@@ -1913,11 +1924,12 @@ CODEX_START_PROMPT="$(cat <<EOF
 11. 不要重写 gstack skill 本体。
 12. Foundation Readiness 如果是 unknown/stale，先跑 .gstack/harness/bin/gstack-harness-readiness --target "$TARGET_DIR"。如果是 partial/blocked，先跑 .gstack/harness/bin/gstack-harness-remediate --target "$TARGET_DIR"，再回到 readiness 复检。
 13. 先输出当前 phase、Foundation Readiness、blockers/warnings、推荐 recipe、推荐 agent、是否需要刷新 memory/code context，以及简短原因。
-14. 本轮开始时先跑 node scripts/ai-context-bridge.mjs baseline，把接管时已有 dirty worktree 记录成 baseline；再用 .gstack/harness/bin/gstack-harness-record-run --event session_start --status in_progress 记录快照。
-15. 本轮结束时跑 node scripts/ai-context-bridge.mjs postchange --scope all 生成 session delta 报告；whole-worktree GitNexus risk 只作为 raw evidence，baseline 前已有脏文件只作为 warning。
-16. 提交前只 stage 本轮 owned files，然后跑 node scripts/ai-context-bridge.mjs postchange --scope staged；staged report 才是 commit gate。
-17. 完成状态更新后必须用 .gstack/harness/bin/gstack-harness-record-run --event session_end --status completed 记录 usage run；如有卡点、用户纠正、能力缺口、warning 或 blocker，把对应参数带上。
-18. 除非我明确要求，不要开始业务代码修改。
+14. 判断用户当前话语时，先结合同一个 session 内最近 1-2 次 Codex 输出，区分确认、纠正、补充需求、改变方向、指出缺失上下文或升级信号；需要长期沉淀时只记录摘要和 inferred delta，不保存完整 transcript。
+15. 本轮开始时先跑 node scripts/ai-context-bridge.mjs baseline，把接管时已有 dirty worktree 记录成 baseline；再用 .gstack/harness/bin/gstack-harness-record-run --event session_start --status in_progress 记录快照。
+16. 本轮结束时跑 node scripts/ai-context-bridge.mjs postchange --scope all 生成 session delta 报告；whole-worktree GitNexus risk 只作为 raw evidence，baseline 前已有脏文件只作为 warning。
+17. 提交前只 stage 本轮 owned files，然后跑 node scripts/ai-context-bridge.mjs postchange --scope staged；staged report 才是 commit gate。
+18. 完成状态更新后必须用 .gstack/harness/bin/gstack-harness-record-run --event session_end --status completed 记录 usage run；如有卡点、用户纠正、能力缺口、warning 或 blocker，把对应参数带上。
+19. 除非我明确要求，不要开始业务代码修改。
 
 当前安装器给出的初始判断：
 
