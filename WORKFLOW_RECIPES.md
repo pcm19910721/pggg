@@ -137,6 +137,70 @@ capability gaps or registry updates
 模块进入复用前至少要有输入、输出、权限和验证说明。
 ```
 
+## C-2: Agent-Led Atomic Auto Commit
+
+适用：
+
+```text
+Agent 完成实现、文档、测试、协议或 harness 调整
+用户希望减少人工参与提交收尾
+工作区需要按原子主题提交并刷新 code-context baseline
+```
+
+核心原则：
+
+```text
+标准提交由 Agent 主导完成。
+人只处理例外：secret、浏览器 profile、大文件、测试失败、GitNexus high/critical、主题边界无法判断。
+每个 commit 必须可独立解释、可独立验证、可独立 revert。
+提交前 staged gate 是唯一 commit gate；whole-worktree 风险只作为原始证据。
+```
+
+默认命令：
+
+```bash
+.gstack/harness/bin/gstack-harness-atomic-commit
+```
+
+流程：
+
+```text
+读取 git status
+→ 按主题分组 docs / tests / harness / protocol / mixed
+→ 自动刷新 node scripts/ai-context-bridge.mjs baseline
+→ 每次只 stage 一个主题组
+→ 跑 .gstack/harness/bin/gstack-harness-workspace-hygiene gate
+→ 跑 node scripts/ai-context-bridge.mjs postchange --scope staged
+→ commit_gate=pass 时自动 git commit
+→ commit_gate=blocked 或 needs_review 时 unstage 并停止
+→ 成功提交后再次刷新 baseline
+```
+
+调试命令：
+
+```bash
+.gstack/harness/bin/gstack-harness-atomic-commit --dry-run
+.gstack/harness/bin/gstack-harness-atomic-commit --no-commit
+```
+
+产物：
+
+```text
+按主题拆分的 git commits
+.ai-context/change-baseline.json
+.ai-context/runs/<run-id>/run.json
+必要时 docs/WORKSPACE_HYGIENE_REPORT.md 和 .gstack/workspace-hygiene.json
+```
+
+质量门禁：
+
+```text
+不能 git add -A 后一次性提交整棵工作区。
+不能提交 staged gate blocked 或 needs_review 的主题组。
+不能自动提交 secret/sign-in state/browser profile/runtime artifact。
+不能在风险组停止后继续提交后续组。
+```
+
 ## Harness Init Preflow
 
 目标项目里的产品入口：
