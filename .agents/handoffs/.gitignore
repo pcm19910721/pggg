@@ -1,0 +1,3 @@
+current.md
+archive/*.md
+!archive/.gitkeep

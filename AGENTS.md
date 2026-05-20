@@ -50,3 +50,15 @@ This project is indexed by GitNexus as **gstack-multiagent** (977 symbols, 1581 
 - If the user has to repeat the same format, field list, workflow, or schedule twice, record it as a system tuning failure.
 - Promote stable repeated work in this order: handoff rule, workflow recipe, agent capability, scheduled candidate, capability gap, possible new skill.
 - Do not silently enable recurring work. Create a scheduled candidate until cadence, permissions, outputs, failure handling, monitoring, and user approval are explicit.
+
+## Context Boundary And Handoff Rules
+
+- Treat the active chat as a temporary workbench, not a durable memory system.
+- Before continuing a long or shifting conversation, check whether the current window still fits the task. Continue in-place for short discussion, quick answers, and work that is near completion.
+- Proactively suggest a handoff when the conversation moves from discussion to implementation, the goal changes, old assumptions may pollute the next step, multiple plans are open, or the agent must rely on distant chat history.
+- Use `.agents/handoffs/README.md` as the project-local handoff protocol. Keep `AGENTS.md` limited to stable, executable, cross-task project rules and pointers.
+- Prefer a new Codex session for independent implementation work after handoff. Use subagents for temporary expert discussion, parallel investigation, review, or local execution inside the current task, not as the main context-cleaning boundary.
+- Do not default to creating skills for reusable context. One-off context stays in the chat; cross-window continuation uses handoff; project facts go in project docs; stable project rules go in this file.
+- Skills are project-local by default. Create a project skill only for a repeated, executable workflow inside this repo. Create or modify global skills only when a workflow is proven across multiple projects and is independent of this repo's business or architecture.
+- Every durable note or rule must have a clear scope, lifetime, and consumer. If those are unclear, keep it temporary or put it in a handoff instead.
+- Durable context must be able to expire: archive or remove stale handoffs, docs, rules, and project skills instead of only promoting them upward.
