@@ -422,6 +422,38 @@ EOF
   assert_contains "$seed_content_dir/project__seeded__state.md" "project_uid:"
   assert_contains "$seed_content_dir/project__seeded__state.md" "repo_path: \"$seed_dir\""
 
+  local slow_dir="$TMP_ROOT/slow-gbrain"
+  local slow_bin="$TMP_ROOT/slow-bin"
+  mkdir -p "$slow_dir" "$slow_bin"
+  cp "$FAKE_BIN/gbrain" "$slow_bin/gbrain"
+  cat > "$slow_bin/gbrain" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}" in
+  --version)
+    printf 'gbrain-test 0.0.0\n'
+    ;;
+  list)
+    exit 0
+    ;;
+  get|query|tag)
+    exit 0
+    ;;
+  put)
+    sleep 2
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+EOF
+  chmod +x "$slow_bin/gbrain"
+  GSTACK_HARNESS_REGISTRY="$TMP_ROOT/projects.jsonl" PATH="$FAKE_BIN:$PATH" "$INIT" --target "$slow_dir" --project-id slow-gbrain --mode docs-only --no-start-codex > "$slow_dir/init.out"
+  GSTACK_SYNC_GBRAIN_TIMEOUT=1s PATH="$slow_bin:$PATH" "$slow_dir/.gstack/harness/bin/gstack-harness-remediate" --target "$slow_dir" > "$TMP_ROOT/slow-remediate.out"
+  assert_contains "$TMP_ROOT/slow-remediate.out" "Foundation remediation status:"
+  assert_contains "$slow_dir/docs/FOUNDATION_REMEDIATION_REPORT.md" "gbrain_project_memory_sync_timeout"
+
   pass "fresh install writes protocol, agent team, pggg entrypoint, reports, managed block, usage run, and valid JSON"
 }
 

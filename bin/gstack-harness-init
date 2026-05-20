@@ -129,7 +129,7 @@ array_contains() {
 
 is_readiness_warning() {
   case "$1" in
-    gbrain_empty|gbrain_core_pages_missing|gbrain_project_memory_missing|gbrain_project_memory_stale|gbrain_project_memory_sync_failed|gbrain_query_timeout|gbrain_query_failed|gbrain_sync_off|runtime_missing|not_git_repo|browse_missing|code_context_status_failed|gbrain_seed_failed|gbrain_seed_timeout)
+    gbrain_empty|gbrain_core_pages_missing|gbrain_project_memory_missing|gbrain_project_memory_stale|gbrain_project_memory_sync_failed|gbrain_project_memory_sync_timeout|gbrain_query_timeout|gbrain_query_failed|gbrain_sync_off|runtime_missing|not_git_repo|browse_missing|code_context_status_failed|gbrain_seed_failed|gbrain_seed_timeout)
       return 0
       ;;
     *)
@@ -1821,7 +1821,7 @@ EOF
 write_file "docs/FOUNDATION_READINESS_REPORT.md" "$READINESS_REPORT"
 
 if [ "$DRY_RUN" -ne 1 ] && [ "$GBRAIN_STATUS" = "ready" ] && [ -f "$TARGET_DIR/scripts/ai-context-bridge.mjs" ] && [ -f "$TARGET_DIR/.ai-context/project.json" ]; then
-  if (cd "$TARGET_DIR" && timeout 90s node scripts/ai-context-bridge.mjs sync-gbrain > "$TARGET_DIR/.gstack/sync-gbrain-last.json" 2> "$TARGET_DIR/.gstack/sync-gbrain-last.err"); then
+  if (cd "$TARGET_DIR" && timeout 90s node scripts/ai-context-bridge.mjs sync-gbrain --page state --page handoff > "$TARGET_DIR/.gstack/sync-gbrain-last.json" 2> "$TARGET_DIR/.gstack/sync-gbrain-last.err"); then
     :
   else
     log "warning: initial gbrain project memory sync skipped or timed out"
@@ -1852,7 +1852,7 @@ if [ "$DRY_RUN" -ne 1 ] && [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-
     NEXT_AGENT="${NEXT_AGENT:-Orchestrator}"
     NEXT_RECIPE="${NEXT_RECIPE:-R0 Restore / Resume Context}"
     if [ "$GBRAIN_STATUS" = "ready" ] && [ -f "$TARGET_DIR/scripts/ai-context-bridge.mjs" ] && [ -f "$TARGET_DIR/.ai-context/project.json" ]; then
-      (cd "$TARGET_DIR" && timeout 90s node scripts/ai-context-bridge.mjs sync-gbrain > "$TARGET_DIR/.gstack/sync-gbrain-last.json" 2> "$TARGET_DIR/.gstack/sync-gbrain-last.err") || true
+      (cd "$TARGET_DIR" && timeout 90s node scripts/ai-context-bridge.mjs sync-gbrain --page state --page handoff > "$TARGET_DIR/.gstack/sync-gbrain-last.json" 2> "$TARGET_DIR/.gstack/sync-gbrain-last.err") || true
     fi
   fi
 fi

@@ -119,6 +119,34 @@ process.exit(0);
   return gbrain;
 }
 
+function installRecordingGbrain(bin, logPath) {
+  fs.mkdirSync(bin, { recursive: true });
+  const gbrain = path.join(bin, 'gbrain');
+  fs.writeFileSync(gbrain, `#!/usr/bin/env node
+const fs = require('fs');
+const [command, slug] = process.argv.slice(2);
+if (command === '--version') {
+  console.log('gbrain-test 0.0.0');
+  process.exit(0);
+}
+if (command === 'get') {
+  console.log('# existing');
+  process.exit(0);
+}
+if (command === 'query') {
+  console.log('ok');
+  process.exit(0);
+}
+if (command === 'put') {
+  fs.appendFileSync(${JSON.stringify(logPath)}, slug + '\\n');
+  process.exit(0);
+}
+process.exit(0);
+`);
+  fs.chmodSync(gbrain, 0o755);
+  return gbrain;
+}
+
 test('refresh discovers GitNexus installed under HOME nvm when default PATH lacks gitnexus', () => {
   const project = tempGitProject();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-context-bridge-home-'));
@@ -288,4 +316,41 @@ test('memory-check reports stale code context and missing gbrain pages', () => {
   assert.equal(report.gbrain.missing_pages.includes('project/bridge-test/state'), true);
   assert.equal(report.gbrain.stale_pages.includes('project/bridge-test/gitnexus-index'), true);
   assert.equal(report.conflicts.some((conflict) => conflict.field === 'gitnexus_indexed_commit'), true);
+});
+
+test('sync-gbrain can write a minimal page set and reports per-page progress', () => {
+  const project = tempGitProject();
+  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-context-bridge-bin-'));
+  const logPath = path.join(fakeBin, 'gbrain-put.log');
+  installRecordingGbrain(fakeBin, logPath);
+  fs.mkdirSync(path.join(project, '.gitnexus'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.gitnexus', 'meta.json'), JSON.stringify({
+    lastCommit: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: project, encoding: 'utf8' }).stdout.trim(),
+    indexedAt: '2026-05-10T00:00:00.000Z',
+    stats: { files: 1, nodes: 1, edges: 0 },
+  }));
+
+  const result = spawnSync(process.execPath, [
+    bridge,
+    'sync-gbrain',
+    '--page', 'state',
+    '--page', 'handoff',
+  ], {
+    cwd: project,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.pages_selected.map((page) => page.key), ['state', 'handoff']);
+  assert.deepEqual(fs.readFileSync(logPath, 'utf8').trim().split(/\r?\n/), [
+    'project/bridge-test/state',
+    'project/bridge-test/handoff',
+  ]);
+  assert.match(result.stderr, /sync-gbrain writing 1\/2 state project\/bridge-test\/state/);
+  assert.match(result.stderr, /sync-gbrain writing 2\/2 handoff project\/bridge-test\/handoff/);
 });

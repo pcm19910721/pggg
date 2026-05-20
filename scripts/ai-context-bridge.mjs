@@ -1434,11 +1434,13 @@ async function commandSyncGbrain(args = {}) {
   const uid = projectUid(config, summary);
   const written = [];
 
-  for (const [key, slug, content] of pages) {
+  for (const [index, page] of pages.entries()) {
+    const [key, slug, content] = page;
     if (args.dryRun) {
       written.push({ key, slug, dry_run: true });
       continue;
     }
+    process.stderr.write(`sync-gbrain writing ${index + 1}/${pages.length} ${key} ${slug}\n`);
     const result = writeGbrain(slug, content, { timeoutMs: 30000 });
     if (!result.ok) {
       process.stderr.write(result.stdout);

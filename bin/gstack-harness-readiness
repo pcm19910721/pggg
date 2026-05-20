@@ -211,26 +211,10 @@ if [ -n "$GBRAIN_BIN" ] && "$GBRAIN_BIN" --version >/dev/null 2>&1; then
       GBRAIN_CORE_MISSING="${GBRAIN_CORE_MISSING}${GBRAIN_CORE_MISSING:+,}$core_slug"
     fi
   done
-  CODE_CONTEXT_INDEXED_COMMIT="$(node -e '
-const fs = require("fs");
-try {
-  const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-  process.stdout.write(s.last_commit || "");
-} catch {}
-' "$TARGET_DIR/.ai-context/gitnexus-status.json" 2>/dev/null || true)"
   for memory_slug in \
-    "project/$PROJECT_ID/gitnexus-index" \
-    "project/$PROJECT_ID/architecture" \
-    "project/$PROJECT_ID/hotspots" \
     "project/$PROJECT_ID/handoff"
   do
-    if MEMORY_PAGE="$(timeout 8s "$GBRAIN_BIN" get "$memory_slug" 2>/dev/null)"; then
-      if [ -n "$CODE_CONTEXT_INDEXED_COMMIT" ] && [ -n "$MEMORY_PAGE" ] && [ "$memory_slug" = "project/$PROJECT_ID/gitnexus-index" ] && printf '%s\n' "$MEMORY_PAGE" | grep -Fq "type: gitnexus_index"; then
-        if ! printf '%s\n' "$MEMORY_PAGE" | grep -Fq "$CODE_CONTEXT_INDEXED_COMMIT"; then
-          GBRAIN_MEMORY_STALE="${GBRAIN_MEMORY_STALE}${GBRAIN_MEMORY_STALE:+,}$memory_slug"
-        fi
-      fi
-    else
+    if ! timeout 8s "$GBRAIN_BIN" get "$memory_slug" >/dev/null 2>&1; then
       GBRAIN_MEMORY_MISSING="${GBRAIN_MEMORY_MISSING}${GBRAIN_MEMORY_MISSING:+,}$memory_slug"
     fi
   done
@@ -438,6 +422,7 @@ function withoutReadinessWarnings(items) {
     'gbrain_seed_timeout',
     'gbrain_project_memory_missing',
     'gbrain_project_memory_stale',
+    'gbrain_project_memory_sync_timeout',
     'gitnexus_detect_changes_critical_due_large_dirty_worktree',
   ]);
   return items.filter((item) => !readinessWarnings.has(String(item)));

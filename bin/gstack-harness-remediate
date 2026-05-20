@@ -24,6 +24,7 @@ EOF
 TARGET="."
 DRY_RUN=0
 SKIP_CODE_CONTEXT=0
+SYNC_GBRAIN_TIMEOUT="${GSTACK_SYNC_GBRAIN_TIMEOUT:-90s}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -489,27 +490,45 @@ if [ -n "$GBRAIN_BIN" ]; then
 fi
 if [ "$SKIP_CODE_CONTEXT" -ne 1 ] && [ -f "$TARGET_DIR/scripts/ai-context-bridge.mjs" ] && [ -f "$TARGET_DIR/.ai-context/project.json" ]; then
   if [ "$DRY_RUN" -eq 1 ]; then
-    log "DRY_RUN node scripts/ai-context-bridge.mjs sync-gbrain"
-  elif [ -n "$GBRAIN_BIN" ] && "$GBRAIN_BIN" --version >/dev/null 2>&1 && (cd "$TARGET_DIR" && node scripts/ai-context-bridge.mjs sync-gbrain > "$TMP_DIR/sync-gbrain.out" 2> "$TMP_DIR/sync-gbrain.err"); then
-    SYNC_STATUS="$(json_field "$TMP_DIR/sync-gbrain.out" "state.status" "unknown")"
-    record_action "sync_gbrain_project_memory" "project/$PROJECT_ID" "ran GitNexus bridge sync-gbrain ($SYNC_STATUS)"
-    if [ "$SYNC_STATUS" != "synced" ]; then
-      while IFS= read -r sync_warning; do
-        [ -n "$sync_warning" ] && record_warning "$sync_warning"
-      done < <(node -e 'const fs=require("fs"); try { const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); for (const w of (s.warnings||[])) console.log(String(w)); } catch {}' "$TMP_DIR/sync-gbrain.out")
-      record_file ".ai-context/gbrain-fallback" "captured gbrain fallback artifacts from bridge sync-gbrain"
+    log "DRY_RUN node scripts/ai-context-bridge.mjs sync-gbrain --page state --page handoff"
+  elif [ -n "$GBRAIN_BIN" ] && "$GBRAIN_BIN" --version >/dev/null 2>&1; then
+    sync_rc=0
+    (cd "$TARGET_DIR" && timeout "$SYNC_GBRAIN_TIMEOUT" node scripts/ai-context-bridge.mjs sync-gbrain --page state --page handoff > "$TMP_DIR/sync-gbrain.out" 2> "$TMP_DIR/sync-gbrain.err") || sync_rc="$?"
+    if [ "$sync_rc" -eq 0 ]; then
+      SYNC_STATUS="$(json_field "$TMP_DIR/sync-gbrain.out" "state.status" "unknown")"
+      record_action "sync_gbrain_project_memory" "project/$PROJECT_ID" "ran GitNexus bridge sync-gbrain ($SYNC_STATUS)"
+      if [ "$SYNC_STATUS" != "synced" ]; then
+        while IFS= read -r sync_warning; do
+          [ -n "$sync_warning" ] && record_warning "$sync_warning"
+        done < <(node -e 'const fs=require("fs"); try { const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); for (const w of (s.warnings||[])) console.log(String(w)); } catch {}' "$TMP_DIR/sync-gbrain.out")
+        record_file ".ai-context/gbrain-fallback" "captured gbrain fallback artifacts from bridge sync-gbrain"
+      fi
+      record_file "docs/CODE_CONTEXT_REPORT.md" "refreshed by bridge sync-gbrain"
+      record_file ".ai-context/gitnexus-status.json" "refreshed by bridge sync-gbrain"
+      record_file ".ai-context/gitnexus-index.json" "refreshed by bridge sync-gbrain"
+      record_file ".ai-context/gitnexus-index.md" "refreshed by bridge sync-gbrain"
+    else
+      if [ "$sync_rc" -eq 124 ]; then
+        record_warning "gbrain_project_memory_sync_timeout"
+      else
+        record_warning "gbrain_project_memory_sync_failed"
+      fi
+      record_action "sync_gbrain_project_memory" "project/$PROJECT_ID" "bridge sync-gbrain failed with exit code $sync_rc; continuing with status fallback"
+      if (cd "$TARGET_DIR" && node scripts/ai-context-bridge.mjs status > "$TMP_DIR/code-context-status.out" 2> "$TMP_DIR/code-context-status.err"); then
+        record_action "refresh_code_context_status" "docs/CODE_CONTEXT_REPORT.md" "ran GitNexus bridge status after sync-gbrain failure"
+        record_file "docs/CODE_CONTEXT_REPORT.md" "refreshed by bridge status"
+        record_file ".ai-context/gitnexus-status.json" "refreshed by bridge status"
+      fi
     fi
-    record_file "docs/CODE_CONTEXT_REPORT.md" "refreshed by bridge sync-gbrain"
-    record_file ".ai-context/gitnexus-status.json" "refreshed by bridge sync-gbrain"
-    record_file ".ai-context/gitnexus-index.json" "refreshed by bridge sync-gbrain"
-    record_file ".ai-context/gitnexus-index.md" "refreshed by bridge sync-gbrain"
-  elif (cd "$TARGET_DIR" && node scripts/ai-context-bridge.mjs status > "$TMP_DIR/code-context-status.out" 2> "$TMP_DIR/code-context-status.err"); then
-    record_action "refresh_code_context_status" "docs/CODE_CONTEXT_REPORT.md" "ran GitNexus bridge status"
-    record_file "docs/CODE_CONTEXT_REPORT.md" "refreshed by bridge status"
-    record_file ".ai-context/gitnexus-status.json" "refreshed by bridge status"
-    record_warning "gbrain_project_memory_sync_failed"
   else
-    record_warning "code_context_status_failed"
+    if (cd "$TARGET_DIR" && node scripts/ai-context-bridge.mjs status > "$TMP_DIR/code-context-status.out" 2> "$TMP_DIR/code-context-status.err"); then
+      record_action "refresh_code_context_status" "docs/CODE_CONTEXT_REPORT.md" "ran GitNexus bridge status"
+      record_file "docs/CODE_CONTEXT_REPORT.md" "refreshed by bridge status"
+      record_file ".ai-context/gitnexus-status.json" "refreshed by bridge status"
+      record_warning "gbrain_project_memory_sync_failed"
+    else
+      record_warning "code_context_status_failed"
+    fi
   fi
 fi
 
@@ -613,6 +632,7 @@ const transientWarnings = new Set([
   'gbrain_project_memory_missing',
   'gbrain_project_memory_stale',
   'gbrain_project_memory_sync_failed',
+  'gbrain_project_memory_sync_timeout',
 ]);
 const existingWarnings = (Array.isArray(state.warnings) ? state.warnings : [])
   .filter((warning) => !transientWarnings.has(String(warning)));
@@ -651,6 +671,7 @@ if (hardBlockers.length) {
   warnings.includes('gbrain_project_memory_missing') ||
   warnings.includes('gbrain_project_memory_stale') ||
   warnings.includes('gbrain_project_memory_sync_failed') ||
+  warnings.includes('gbrain_project_memory_sync_timeout') ||
   warnings.includes('gbrain_core_pages_missing')
 ) {
   remediationStatus = 'partial';
