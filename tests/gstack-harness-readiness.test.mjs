@@ -33,6 +33,38 @@ function tempProject() {
   return project;
 }
 
+function installTimeoutGbrain(bin) {
+  fs.mkdirSync(bin, { recursive: true });
+  const gbrain = path.join(bin, 'gbrain');
+  fs.writeFileSync(gbrain, `#!/usr/bin/env node
+const [command, slug] = process.argv.slice(2);
+if (command === '--version') {
+  console.log('gbrain-test 0.0.0');
+  process.exit(0);
+}
+if (command === 'list') {
+  console.log('project/readiness-test/overview');
+  console.log('project/readiness-test/state');
+  console.log('project/readiness-test/foundation-readiness');
+  console.log('project/readiness-test/code-context');
+  console.log('project/readiness-test/quality-gates');
+  console.log('project/readiness-test/handoff');
+  process.exit(0);
+}
+if (command === 'get') {
+  if (slug === 'project/readiness-test/code-context') process.exit(124);
+  console.log('# page');
+  process.exit(0);
+}
+if (command === 'query') {
+  console.log('ok');
+  process.exit(0);
+}
+process.exit(0);
+`);
+  fs.chmodSync(gbrain, 0o755);
+}
+
 test('readiness detects stale code context when status commit differs from HEAD', () => {
   const project = tempProject();
   const firstHead = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: project, encoding: 'utf8' }).stdout.trim();
@@ -70,4 +102,31 @@ test('readiness detects stale code context when status commit differs from HEAD'
 
   const output = JSON.parse(result.stdout);
   assert.equal(output.code_context, 'stale');
+});
+
+test('readiness reports gbrain get timeout separately from missing pages', () => {
+  const project = tempProject();
+  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-readiness-bin-'));
+  installTimeoutGbrain(fakeBin);
+
+  const result = spawnSync(readinessBin, [
+    '--target', project,
+    '--mode', 'docs-only',
+    '--skip-code-context',
+    '--json',
+  ], {
+    cwd: root,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.gbrain_core_missing.includes('project/readiness-test/code-context'), false);
+  assert.equal(output.gbrain_core_timeout.includes('project/readiness-test/code-context'), true);
+  assert.equal(output.warnings.includes('gbrain_core_pages_timeout'), true);
+  assert.equal(output.next_recommended_agent, 'Problem Handling Agent');
 });

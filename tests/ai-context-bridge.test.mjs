@@ -119,6 +119,39 @@ process.exit(0);
   return gbrain;
 }
 
+function installTimeoutGbrain(bin, pages = {}, timeoutSlugs = []) {
+  fs.mkdirSync(bin, { recursive: true });
+  const store = path.join(bin, 'gbrain-pages.json');
+  fs.writeFileSync(store, JSON.stringify(pages, null, 2));
+  const gbrain = path.join(bin, 'gbrain');
+  fs.writeFileSync(gbrain, `#!/usr/bin/env node
+const fs = require('fs');
+const store = ${JSON.stringify(store)};
+const pages = JSON.parse(fs.readFileSync(store, 'utf8'));
+const timeoutSlugs = new Set(${JSON.stringify(timeoutSlugs)});
+const [command, slug] = process.argv.slice(2);
+if (command === '--version') {
+  console.log('gbrain-test 0.0.0');
+  process.exit(0);
+}
+if (command === 'get') {
+  if (timeoutSlugs.has(slug)) process.exit(124);
+  if (Object.prototype.hasOwnProperty.call(pages, slug)) {
+    process.stdout.write(pages[slug]);
+    process.exit(0);
+  }
+  process.exit(1);
+}
+if (command === 'query') {
+  console.log('ok');
+  process.exit(0);
+}
+process.exit(0);
+`);
+  fs.chmodSync(gbrain, 0o755);
+  return gbrain;
+}
+
 function installRecordingGbrain(bin, logPath) {
   fs.mkdirSync(bin, { recursive: true });
   const gbrain = path.join(bin, 'gbrain');
@@ -318,6 +351,38 @@ test('memory-check reports stale code context and missing gbrain pages', () => {
   assert.equal(report.conflicts.some((conflict) => conflict.field === 'gitnexus_indexed_commit'), true);
 });
 
+test('memory-check reports gbrain get timeouts separately from missing pages', () => {
+  const project = tempGitProject();
+  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-context-bridge-bin-'));
+  installTimeoutGbrain(fakeBin, {
+    'project/bridge-test/overview': 'type: project_overview\n',
+    'project/bridge-test/state': 'type: project_state\n',
+  }, ['project/bridge-test/state']);
+
+  fs.mkdirSync(path.join(project, '.gitnexus'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.gitnexus', 'meta.json'), JSON.stringify({
+    lastCommit: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: project, encoding: 'utf8' }).stdout.trim(),
+    indexedAt: '2026-05-10T00:00:00.000Z',
+    stats: { files: 1, nodes: 1, edges: 0 },
+  }));
+
+  const result = spawnSync(process.execPath, [bridge, 'memory-check'], {
+    cwd: project,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.gbrain.status, 'timeout');
+  assert.equal(report.gbrain.timeout_pages.includes('project/bridge-test/state'), true);
+  assert.equal(report.gbrain.missing_pages.includes('project/bridge-test/state'), false);
+  assert.equal(report.next_actions.includes('inspect gbrain latency or rerun memory-check'), true);
+});
+
 test('sync-gbrain can write a minimal page set and reports per-page progress', () => {
   const project = tempGitProject();
   const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-context-bridge-bin-'));
@@ -353,4 +418,41 @@ test('sync-gbrain can write a minimal page set and reports per-page progress', (
   ]);
   assert.match(result.stderr, /sync-gbrain writing 1\/2 state project\/bridge-test\/state/);
   assert.match(result.stderr, /sync-gbrain writing 2\/2 handoff project\/bridge-test\/handoff/);
+});
+
+test('sync-gbrain allows project uid migration when existing page repo path matches', () => {
+  const project = tempGitProject();
+  spawnSync('git', ['remote', 'add', 'origin', 'git@github.com:example/bridge-test.git'], { cwd: project, encoding: 'utf8' });
+  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-context-bridge-bin-'));
+  installFakeGbrain(fakeBin, {
+    'project/bridge-test/overview': `---
+type: project_overview
+project: bridge-test
+project_uid: old-path-derived-id
+repo_path: ${JSON.stringify(project)}
+---
+
+# Project Overview
+`,
+  });
+  fs.mkdirSync(path.join(project, '.gitnexus'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.gitnexus', 'meta.json'), JSON.stringify({
+    lastCommit: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: project, encoding: 'utf8' }).stdout.trim(),
+    indexedAt: '2026-05-10T00:00:00.000Z',
+    stats: { files: 1, nodes: 1, edges: 0 },
+  }));
+
+  const result = spawnSync(process.execPath, [bridge, 'sync-gbrain', '--page', 'state'], {
+    cwd: project,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.status, 'synced');
+  assert.deepEqual(report.pages_selected.map((page) => page.key), ['state']);
 });

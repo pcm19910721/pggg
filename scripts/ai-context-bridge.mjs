@@ -11,6 +11,8 @@ const CONFIG_PATH = path.join(ROOT, '.ai-context', 'project.json');
 const CHANGE_BASELINE_PATH = path.join(ROOT, '.ai-context', 'change-baseline.json');
 const START = '<!-- project-context-bridge:start -->';
 const END = '<!-- project-context-bridge:end -->';
+const GBRAIN_GET_TIMEOUT_MS = Number(process.env.GSTACK_GBRAIN_GET_TIMEOUT_MS || '') || 30000;
+const GBRAIN_QUERY_TIMEOUT_MS = Number(process.env.GSTACK_GBRAIN_QUERY_TIMEOUT_MS || '') || 30000;
 const DEFAULT_SYNC_GBRAIN_KEYS = [
   'overview',
   'state',
@@ -532,9 +534,13 @@ function runGbrain(args, opts = {}) {
   });
 }
 
+function isTimeoutResult(result) {
+  return result?.status === 124 || result?.error?.code === 'ETIMEDOUT';
+}
+
 function getGbrain(slug, opts = {}) {
   return runGbrain(['get', slug], {
-    timeoutMs: opts.timeoutMs || 8000,
+    timeoutMs: opts.timeoutMs || GBRAIN_GET_TIMEOUT_MS,
   });
 }
 
@@ -1125,12 +1131,14 @@ async function assertNoProjectCollision(config, summary, slugs) {
 
   const expectedUid = projectUid(config, summary);
   const existingUid = frontmatterValue(existing.stdout, 'project_uid');
+  const existingPath = frontmatterValue(existing.stdout, 'repo_path')
+    || legacyRepoPathValue(existing.stdout);
+  if (existingUid && existingUid !== expectedUid && existingPath && samePath(existingPath, summary.repo_path || config.repo_path)) {
+    return;
+  }
   if (existingUid && existingUid !== expectedUid) {
     throw new Error(`gbrain project collision for ${overview}: existing project_uid ${existingUid} differs from ${expectedUid}`);
   }
-
-  const existingPath = frontmatterValue(existing.stdout, 'repo_path')
-    || legacyRepoPathValue(existing.stdout);
   if (!existingUid && existingPath && !samePath(existingPath, summary.repo_path || config.repo_path)) {
     throw new Error(`gbrain project collision for ${overview}: existing repo_path ${existingPath} differs from ${summary.repo_path || config.repo_path}`);
   }
@@ -1195,17 +1203,18 @@ function repairProjectMemoryMarkdown(slug, markdown, config, summary) {
   const repoPath = summary.repo_path || config.repo_path || '';
   const remoteUrl = summary.remote_url || '';
   const existingUid = frontmatterScalar(markdown, 'project_uid');
-  if (existingUid && existingUid !== expectedUid) {
+
+  const frontmatterRepoPath = frontmatterScalar(markdown, 'repo_path');
+  const legacyRepoPath = legacyRepoPathValue(markdown);
+  const existingRepoPath = frontmatterRepoPath || legacyRepoPath;
+  const sameRepoPath = existingRepoPath && samePath(existingRepoPath, repoPath);
+  if (existingUid && existingUid !== expectedUid && !sameRepoPath) {
     return {
       ok: false,
       changed: false,
       reason: `project_uid_mismatch:${existingUid}`,
     };
   }
-
-  const frontmatterRepoPath = frontmatterScalar(markdown, 'repo_path');
-  const legacyRepoPath = legacyRepoPathValue(markdown);
-  const existingRepoPath = frontmatterRepoPath || legacyRepoPath;
   if (existingRepoPath && !samePath(existingRepoPath, repoPath)) {
     return {
       ok: false,
@@ -1217,7 +1226,7 @@ function repairProjectMemoryMarkdown(slug, markdown, config, summary) {
   const fields = {};
   if (!frontmatterScalar(markdown, 'type')) fields.type = inferProjectPageType(slug, markdown);
   if (!frontmatterScalar(markdown, 'project')) fields.project = config.project_id;
-  if (!existingUid) fields.project_uid = expectedUid;
+  if (!existingUid || existingUid !== expectedUid) fields.project_uid = expectedUid;
   if (!frontmatterRepoPath) fields.repo_path = repoPath;
   if (remoteUrl && !frontmatterScalar(markdown, 'remote_url')) fields.remote_url = remoteUrl;
   if (!frontmatterBlock(markdown)) {
@@ -1498,6 +1507,7 @@ async function commandMemoryCheck() {
     slugs.handoff,
   ].filter(Boolean);
   const missingPages = [];
+  const timeoutPages = [];
   const stalePages = [];
   const conflicts = [];
   let gbrainStatus = 'ready';
@@ -1507,10 +1517,14 @@ async function commandMemoryCheck() {
   if (!gbrainVersion.ok) {
     gbrainStatus = 'unavailable';
   } else {
-    const query = runGbrain(['query', `project ${config.project_id} memory health`, '--no-expand', '--limit', '1'], { timeoutMs: 12000 });
-    gbrainQueryStatus = query.ok ? 'ready' : (query.status === 124 ? 'timeout' : 'failed');
+    const query = runGbrain(['query', `project ${config.project_id} memory health`, '--no-expand', '--limit', '1'], { timeoutMs: GBRAIN_QUERY_TIMEOUT_MS });
+    gbrainQueryStatus = query.ok ? 'ready' : (isTimeoutResult(query) ? 'timeout' : 'failed');
     for (const slug of requiredPages) {
-      const page = getGbrain(slug, { timeoutMs: 8000 });
+      const page = getGbrain(slug);
+      if (isTimeoutResult(page)) {
+        timeoutPages.push(slug);
+        continue;
+      }
       if (!page.ok || !page.stdout.trim()) {
         missingPages.push(slug);
         continue;
@@ -1525,7 +1539,8 @@ async function commandMemoryCheck() {
         });
       }
     }
-    if (gbrainQueryStatus === 'timeout' || gbrainQueryStatus === 'failed') gbrainStatus = gbrainQueryStatus;
+    if (gbrainQueryStatus === 'timeout' || timeoutPages.length) gbrainStatus = 'timeout';
+    else if (gbrainQueryStatus === 'failed') gbrainStatus = 'failed';
     else if (missingPages.length) gbrainStatus = 'missing';
     else if (stalePages.length) gbrainStatus = 'stale';
   }
@@ -1567,6 +1582,7 @@ async function commandMemoryCheck() {
       query: gbrainQueryStatus,
       required_pages: requiredPages,
       missing_pages: missingPages,
+      timeout_pages: timeoutPages,
       stale_pages: stalePages,
     },
     local_artifacts: {
@@ -1578,6 +1594,7 @@ async function commandMemoryCheck() {
     next_actions: [
       ...(gitnexusStatus === 'stale' ? ['node scripts/ai-context-bridge.mjs refresh'] : []),
       ...(missingPages.length || stalePages.length ? ['node scripts/ai-context-bridge.mjs sync-gbrain --dry-run', 'node scripts/ai-context-bridge.mjs sync-gbrain'] : []),
+      ...(timeoutPages.length || gbrainQueryStatus === 'timeout' ? ['inspect gbrain latency or rerun memory-check'] : []),
       ...(missingArtifacts.length || staleArtifacts.length ? ['node scripts/ai-context-bridge.mjs status'] : []),
     ],
   }, null, 2));

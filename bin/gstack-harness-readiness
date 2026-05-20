@@ -179,15 +179,20 @@ GBRAIN_QUERY_STATUS="not_run"
 GBRAIN_QUERY_EVIDENCE="gbrain unavailable"
 GBRAIN_CORE_PRESENT="0"
 GBRAIN_CORE_MISSING=""
+GBRAIN_CORE_TIMEOUT=""
 GBRAIN_MEMORY_MISSING=""
+GBRAIN_MEMORY_TIMEOUT=""
 GBRAIN_MEMORY_STALE=""
 GBRAIN_BIN=""
+GBRAIN_LIST_TIMEOUT="${GSTACK_GBRAIN_LIST_TIMEOUT:-15s}"
+GBRAIN_GET_TIMEOUT="${GSTACK_GBRAIN_GET_TIMEOUT:-30s}"
+GBRAIN_QUERY_TIMEOUT="${GSTACK_GBRAIN_QUERY_TIMEOUT:-30s}"
 if GBRAIN_BIN="$(detect_gbrain_bin 2>/dev/null)"; then
   activate_gbrain_path "$GBRAIN_BIN"
 fi
 if [ -n "$GBRAIN_BIN" ] && "$GBRAIN_BIN" --version >/dev/null 2>&1; then
   GBRAIN_STATUS="empty"
-  if GBRAIN_LIST_OUTPUT="$(timeout 6s "$GBRAIN_BIN" list 2>&1)"; then
+  if GBRAIN_LIST_OUTPUT="$(timeout "$GBRAIN_LIST_TIMEOUT" "$GBRAIN_BIN" list 2>&1)"; then
     if [ -n "$GBRAIN_LIST_OUTPUT" ]; then
       GBRAIN_PAGES="$(printf '%s\n' "$GBRAIN_LIST_OUTPUT" | wc -l | tr -d ' ')"
     else
@@ -206,7 +211,11 @@ if [ -n "$GBRAIN_BIN" ] && "$GBRAIN_BIN" --version >/dev/null 2>&1; then
     "project/$PROJECT_ID/code-context" \
     "project/$PROJECT_ID/quality-gates"
   do
-    if ! timeout 8s "$GBRAIN_BIN" get "$core_slug" >/dev/null 2>&1; then
+    core_rc=0
+    timeout "$GBRAIN_GET_TIMEOUT" "$GBRAIN_BIN" get "$core_slug" >/dev/null 2>&1 || core_rc="$?"
+    if [ "$core_rc" -eq 124 ]; then
+      GBRAIN_CORE_TIMEOUT="${GBRAIN_CORE_TIMEOUT}${GBRAIN_CORE_TIMEOUT:+,}$core_slug"
+    elif [ "$core_rc" -ne 0 ]; then
       GBRAIN_CORE_PRESENT="0"
       GBRAIN_CORE_MISSING="${GBRAIN_CORE_MISSING}${GBRAIN_CORE_MISSING:+,}$core_slug"
     fi
@@ -214,7 +223,11 @@ if [ -n "$GBRAIN_BIN" ] && "$GBRAIN_BIN" --version >/dev/null 2>&1; then
   for memory_slug in \
     "project/$PROJECT_ID/handoff"
   do
-    if ! timeout 8s "$GBRAIN_BIN" get "$memory_slug" >/dev/null 2>&1; then
+    memory_rc=0
+    timeout "$GBRAIN_GET_TIMEOUT" "$GBRAIN_BIN" get "$memory_slug" >/dev/null 2>&1 || memory_rc="$?"
+    if [ "$memory_rc" -eq 124 ]; then
+      GBRAIN_MEMORY_TIMEOUT="${GBRAIN_MEMORY_TIMEOUT}${GBRAIN_MEMORY_TIMEOUT:+,}$memory_slug"
+    elif [ "$memory_rc" -ne 0 ]; then
       GBRAIN_MEMORY_MISSING="${GBRAIN_MEMORY_MISSING}${GBRAIN_MEMORY_MISSING:+,}$memory_slug"
     fi
   done
@@ -222,7 +235,7 @@ if [ -n "$GBRAIN_BIN" ] && "$GBRAIN_BIN" --version >/dev/null 2>&1; then
     GBRAIN_STATUS="ready"
   fi
 
-  if GBRAIN_QUERY_OUTPUT="$(timeout 20s "$GBRAIN_BIN" query "gbrain healthcheck project memory" --no-expand --limit 1 2>&1)"; then
+  if GBRAIN_QUERY_OUTPUT="$(timeout "$GBRAIN_QUERY_TIMEOUT" "$GBRAIN_BIN" query "gbrain healthcheck project memory" --no-expand --limit 1 2>&1)"; then
     if [ "$GBRAIN_STATUS" = "ready" ]; then
       GBRAIN_QUERY_STATUS="ready"
       GBRAIN_QUERY_EVIDENCE="health query completed"
@@ -265,7 +278,9 @@ GIT_HEAD="$GIT_HEAD" \
 GBRAIN_STATUS="$GBRAIN_STATUS" \
 GBRAIN_PAGES="$GBRAIN_PAGES" \
 GBRAIN_CORE_MISSING="$GBRAIN_CORE_MISSING" \
+GBRAIN_CORE_TIMEOUT="$GBRAIN_CORE_TIMEOUT" \
 GBRAIN_MEMORY_MISSING="$GBRAIN_MEMORY_MISSING" \
+GBRAIN_MEMORY_TIMEOUT="$GBRAIN_MEMORY_TIMEOUT" \
 GBRAIN_MEMORY_STALE="$GBRAIN_MEMORY_STALE" \
 GBRAIN_QUERY_STATUS="$GBRAIN_QUERY_STATUS" \
 GBRAIN_QUERY_EVIDENCE="$GBRAIN_QUERY_EVIDENCE" \
@@ -411,6 +426,7 @@ function withoutReadinessWarnings(items) {
     'gbrain_unavailable',
     'gbrain_empty',
     'gbrain_core_pages_missing',
+    'gbrain_core_pages_timeout',
     'gbrain_query_timeout',
     'gbrain_query_failed',
     'gbrain_sync_off',
@@ -421,6 +437,7 @@ function withoutReadinessWarnings(items) {
     'gbrain_seed_failed',
     'gbrain_seed_timeout',
     'gbrain_project_memory_missing',
+    'gbrain_project_memory_timeout',
     'gbrain_project_memory_stale',
     'gbrain_project_memory_sync_timeout',
     'gitnexus_detect_changes_critical_due_large_dirty_worktree',
@@ -447,7 +464,9 @@ const warnings = [];
 if (env.GBRAIN_STATUS === 'unavailable') blockers.push('gbrain_unavailable');
 if (env.GBRAIN_STATUS === 'empty') warnings.push('gbrain_empty');
 if (env.GBRAIN_CORE_MISSING) warnings.push('gbrain_core_pages_missing');
+if (env.GBRAIN_CORE_TIMEOUT) warnings.push('gbrain_core_pages_timeout');
 if (env.GBRAIN_MEMORY_MISSING) warnings.push('gbrain_project_memory_missing');
+if (env.GBRAIN_MEMORY_TIMEOUT) warnings.push('gbrain_project_memory_timeout');
 if (env.GBRAIN_MEMORY_STALE) warnings.push('gbrain_project_memory_stale');
 if (env.GBRAIN_QUERY_STATUS === 'timeout') warnings.push('gbrain_query_timeout');
 if (env.GBRAIN_QUERY_STATUS === 'failed') warnings.push('gbrain_query_failed');
@@ -485,7 +504,12 @@ if (needsFoundationRemediation) {
 } else if (verdict !== 'ready') {
   nextAgent = 'Problem Handling Agent';
   nextRecipe = 'Problem Handling preflight, then R0 Restore / Resume Context';
-} else if (warnings.includes('gbrain_query_timeout') || warnings.includes('gbrain_query_failed')) {
+} else if (
+  warnings.includes('gbrain_query_timeout') ||
+  warnings.includes('gbrain_query_failed') ||
+  warnings.includes('gbrain_core_pages_timeout') ||
+  warnings.includes('gbrain_project_memory_timeout')
+) {
   nextAgent = 'Problem Handling Agent';
   nextRecipe = 'Problem Handling preflight, then R0 Restore / Resume Context';
 }
@@ -505,7 +529,9 @@ nextState.foundation = {
   remediation_report: 'docs/FOUNDATION_REMEDIATION_REPORT.md',
   gbrain: env.GBRAIN_STATUS,
   gbrain_pages: env.GBRAIN_PAGES,
+  gbrain_core_timeout: env.GBRAIN_CORE_TIMEOUT ? env.GBRAIN_CORE_TIMEOUT.split(',') : [],
   gbrain_project_memory_missing: env.GBRAIN_MEMORY_MISSING ? env.GBRAIN_MEMORY_MISSING.split(',') : [],
+  gbrain_project_memory_timeout: env.GBRAIN_MEMORY_TIMEOUT ? env.GBRAIN_MEMORY_TIMEOUT.split(',') : [],
   gbrain_project_memory_stale: env.GBRAIN_MEMORY_STALE ? env.GBRAIN_MEMORY_STALE.split(',') : [],
   gbrain_query: env.GBRAIN_QUERY_STATUS,
   gstack: env.GSTACK_STATUS,
@@ -653,7 +679,9 @@ const summary = {
   mode,
   gbrain: env.GBRAIN_STATUS,
   gbrain_core_missing: env.GBRAIN_CORE_MISSING ? env.GBRAIN_CORE_MISSING.split(',') : [],
+  gbrain_core_timeout: env.GBRAIN_CORE_TIMEOUT ? env.GBRAIN_CORE_TIMEOUT.split(',') : [],
   gbrain_project_memory_missing: env.GBRAIN_MEMORY_MISSING ? env.GBRAIN_MEMORY_MISSING.split(',') : [],
+  gbrain_project_memory_timeout: env.GBRAIN_MEMORY_TIMEOUT ? env.GBRAIN_MEMORY_TIMEOUT.split(',') : [],
   gbrain_project_memory_stale: env.GBRAIN_MEMORY_STALE ? env.GBRAIN_MEMORY_STALE.split(',') : [],
   gbrain_query: env.GBRAIN_QUERY_STATUS,
   gstack: env.GSTACK_STATUS,
