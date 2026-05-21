@@ -157,3 +157,103 @@ printf '{"status":"warning","git":{"status_count":0},"buckets":{"backup_noise":{
   assert.equal(summary.rounds[1].init.status, 'skipped');
   assert.equal(fs.readFileSync(initLog, 'utf8').trim().split(/\r?\n/).length, 1);
 });
+
+test('evaluation runner records GitHub workflow and release gate evidence', () => {
+  const project = tempGitProject();
+  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-evaluate-release-bin-'));
+
+  writeExecutable(path.join(fakeBin, 'init'), `#!/usr/bin/env bash
+exit 0
+`);
+  writeExecutable(path.join(fakeBin, 'readiness'), `#!/usr/bin/env bash
+target="."
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --target) target="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+mkdir -p "$target/.gstack"
+cat > "$target/.gstack/project-state.json" <<'JSON'
+{
+  "release": {
+    "status": "blocked_by_environment",
+    "blockers": ["no_deploy_target"],
+    "remote_url": "https://github.com/acme/release-test",
+    "github_cli_status": "ready"
+  }
+}
+JSON
+cat <<'JSON'
+{
+  "status": "ready",
+  "git": "ready",
+  "github_cli": {
+    "status": "ready",
+    "auth": "authenticated",
+    "command": "gh",
+    "owns": ["github_remote", "ci_runs", "pull_requests", "workflow_runs"]
+  },
+  "repository": { "status": "ready" },
+  "long_term_readiness": { "status": "ready", "blockers": [] },
+  "code_context": "ready",
+  "blockers": [],
+  "warnings": []
+}
+JSON
+`);
+  writeExecutable(path.join(fakeBin, 'hygiene'), `#!/usr/bin/env bash
+printf '{"status":"warning","git":{"status_count":0},"buckets":{"backup_noise":{"count":0},"secret_risk":{"count":0},"large_asset":{"count":0}},"warnings":[],"blockers":[]}\\n'
+`);
+  writeExecutable(path.join(fakeBin, 'gh'), `#!/usr/bin/env bash
+case "$*" in
+  "run list --limit 1 --json databaseId,status,conclusion,headSha,url,createdAt,workflowName")
+    printf '[{"databaseId":12345,"status":"completed","conclusion":"failure","headSha":"abc123","url":"https://github.com/acme/release-test/actions/runs/12345","createdAt":"2026-05-22T01:02:03Z","workflowName":"Test"}]\\n'
+    ;;
+  "pr status --json number,title,url,reviewDecision,state,isDraft,mergeStateStatus,headRefName")
+    printf '{"createdBy":[{"number":77,"title":"Release gate test","url":"https://github.com/acme/release-test/pull/77","reviewDecision":"REVIEW_REQUIRED"}],"needsReview":[]}\\n'
+    ;;
+  *)
+    printf 'unexpected gh args: %s\\n' "$*" >&2
+    exit 2
+    ;;
+esac
+`);
+
+  const result = spawnSync(evaluateBin, [
+    '--target', project,
+    '--rounds', '1',
+    '--json',
+  ], {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: 60_000,
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}:${testPath}`,
+      GSTACK_HARNESS_INIT_BIN: path.join(fakeBin, 'init'),
+      GSTACK_HARNESS_READINESS_BIN: path.join(fakeBin, 'readiness'),
+      GSTACK_HARNESS_HYGIENE_BIN: path.join(fakeBin, 'hygiene'),
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const evaluation = JSON.parse(result.stdout);
+  const releaseGate = evaluation.rounds[0].release_gate;
+  assert.equal(evaluation.summary.release_gate_ready_rounds, 0);
+  assert.equal(evaluation.summary.github_actions_failed_rounds, 1);
+  assert.equal(releaseGate.status, 'blocked');
+  assert.equal(releaseGate.ci.latest_run.database_id, 12345);
+  assert.equal(releaseGate.ci.latest_run.conclusion, 'failure');
+  assert.equal(releaseGate.ci.failure_log_command, 'gh run view 12345 --log-failed');
+  assert.deepEqual(releaseGate.blockers.sort(), ['github_actions_failed', 'no_deploy_target']);
+  assert.equal(releaseGate.pr.current_branch.number, 77);
+
+  const report = fs.readFileSync(path.join(project, 'docs', 'HARNESS_EVALUATION_REPORT.md'), 'utf8');
+  assert.match(report, /## GitHub Workflow \/ Release Gate/);
+  assert.match(report, /Release Gate Ready Rounds: 0\/1/);
+  assert.match(report, /GitHub Actions Failed Rounds: 1\/1/);
+  assert.match(report, /github_actions_failed, no_deploy_target/);
+  assert.match(report, /gh run view 12345 --log-failed/);
+  assert.match(report, /https:\/\/github\.com\/acme\/release-test\/actions\/runs\/12345/);
+});

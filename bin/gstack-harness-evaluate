@@ -94,6 +94,18 @@ function parseJson(stdout, fallback = {}) {
   }
 }
 
+function readJsonFile(file, fallback = {}) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return fallback;
+  }
+}
+
+function unique(items) {
+  return [...new Set(items.filter(Boolean))].sort();
+}
+
 function gitStatusCount() {
   const result = run('git', ['status', '--short'], { cwd: targetDir });
   if (!result.ok) return null;
@@ -128,6 +140,116 @@ function countCentralBackups() {
   return walkFiles(path.join(targetDir, '.gstack', 'backups')).length;
 }
 
+function normalizeRun(runInfo = {}) {
+  if (!runInfo || typeof runInfo !== 'object') return null;
+  return {
+    database_id: runInfo.databaseId ?? runInfo.database_id ?? null,
+    status: runInfo.status || 'unknown',
+    conclusion: runInfo.conclusion || '',
+    head_sha: runInfo.headSha || runInfo.head_sha || '',
+    url: runInfo.url || '',
+    created_at: runInfo.createdAt || runInfo.created_at || '',
+    workflow_name: runInfo.workflowName || runInfo.workflow_name || '',
+  };
+}
+
+function collectReleaseGate(readiness = {}) {
+  const state = readJsonFile(path.join(targetDir, '.gstack', 'project-state.json'), {});
+  const release = state.release || readiness.release || null;
+  const baseBlockers = Array.isArray(release?.blockers) ? release.blockers : [];
+  const githubCli = readiness.github_cli || state.github_cli || {};
+  const gate = {
+    status: 'not_configured',
+    release_status: release?.status || 'unknown',
+    blockers: unique(baseBlockers),
+    remote_url: release?.remote_url || '',
+    github_cli_status: githubCli.status || release?.github_cli_status || 'unknown',
+    ci: {
+      status: release ? 'not_checked' : 'not_configured',
+      latest_run: null,
+      failure_log_command: '',
+      errors: [],
+    },
+    pr: {
+      status: release ? 'not_checked' : 'not_configured',
+      current_branch: null,
+      created_by_count: 0,
+      needs_review_count: 0,
+      review_decision: '',
+      errors: [],
+    },
+  };
+
+  if (!release) return gate;
+
+  const canUseGh = gate.github_cli_status === 'ready'
+    && (!githubCli.auth || githubCli.auth === 'authenticated');
+  if (!canUseGh) {
+    gate.status = gate.blockers.length ? 'blocked' : 'unknown';
+    return gate;
+  }
+
+  const runs = run('gh', [
+    'run',
+    'list',
+    '--limit',
+    '1',
+    '--json',
+    'databaseId,status,conclusion,headSha,url,createdAt,workflowName',
+  ]);
+  if (!runs.ok) {
+    gate.ci.status = 'unknown';
+    gate.ci.errors.push((runs.stderr || runs.stdout || 'gh run list failed').trim());
+    gate.blockers.push('github_actions_unknown');
+  } else {
+    const latest = parseJson(runs.stdout, [])[0] || null;
+    gate.ci.latest_run = normalizeRun(latest);
+    if (!gate.ci.latest_run) {
+      gate.ci.status = 'missing';
+      gate.blockers.push('github_actions_missing');
+    } else if (gate.ci.latest_run.status !== 'completed') {
+      gate.ci.status = gate.ci.latest_run.status || 'in_progress';
+      gate.blockers.push('github_actions_in_progress');
+    } else if (gate.ci.latest_run.conclusion === 'success') {
+      gate.ci.status = 'success';
+    } else {
+      gate.ci.status = gate.ci.latest_run.conclusion || 'failed';
+      gate.blockers.push('github_actions_failed');
+      if (gate.ci.latest_run.database_id) {
+        gate.ci.failure_log_command = `gh run view ${gate.ci.latest_run.database_id} --log-failed`;
+      }
+    }
+  }
+
+  const pr = run('gh', [
+    'pr',
+    'status',
+    '--json',
+    'number,title,url,reviewDecision,state,isDraft,mergeStateStatus,headRefName',
+  ]);
+  if (!pr.ok) {
+    gate.pr.status = 'unknown';
+    gate.pr.errors.push((pr.stderr || pr.stdout || 'gh pr status failed').trim());
+  } else {
+    const prStatus = parseJson(pr.stdout, {});
+    const createdBy = Array.isArray(prStatus.createdBy) ? prStatus.createdBy : [];
+    const needsReview = Array.isArray(prStatus.needsReview) ? prStatus.needsReview : [];
+    const currentBranch = prStatus.currentBranch || createdBy[0] || needsReview[0] || null;
+    gate.pr.status = 'available';
+    gate.pr.current_branch = currentBranch;
+    gate.pr.created_by_count = createdBy.length;
+    gate.pr.needs_review_count = needsReview.length;
+    gate.pr.review_decision = prStatus.reviewDecision || currentBranch?.reviewDecision || '';
+    if (gate.pr.review_decision === 'CHANGES_REQUESTED') {
+      gate.blockers.push('github_pr_blocked');
+    }
+  }
+
+  gate.blockers = unique(gate.blockers);
+  gate.status = gate.blockers.length ? 'blocked' : 'ready';
+  return gate;
+}
+
 function roundStatus(round) {
   const blockers = [
     ...(Array.isArray(round.readiness?.blockers) ? round.readiness.blockers : []),
@@ -158,6 +280,7 @@ for (let i = 1; i <= rounds; i += 1) {
   const readiness = parseJson(readinessRun.stdout, {});
   const hygieneRun = run(commands.hygiene, ['--target', targetDir, '--json']);
   const hygiene = parseJson(hygieneRun.stdout, {});
+  const releaseGate = collectReleaseGate(readiness);
   const afterStatusCount = gitStatusCount();
 
   const result = {
@@ -181,6 +304,7 @@ for (let i = 1; i <= rounds; i += 1) {
     central_backup_files: countCentralBackups(),
     git_status_count_before: beforeStatusCount,
     git_status_count_after: afterStatusCount,
+    release_gate: releaseGate,
     readiness,
     hygiene: {
       status: hygiene.status || 'unknown',
@@ -205,6 +329,8 @@ const summary = {
   repository_ready_rounds: countWhere((round) => round.repository_status === 'ready'),
   long_term_ready_rounds: countWhere((round) => round.long_term_readiness === 'ready'),
   code_context_ready_rounds: countWhere((round) => round.code_context === 'ready'),
+  release_gate_ready_rounds: countWhere((round) => round.release_gate?.status === 'ready'),
+  github_actions_failed_rounds: countWhere((round) => round.release_gate?.blockers?.includes('github_actions_failed')),
   backup_noise_rounds: countWhere((round) => round.backup_noise_count > 0),
   scattered_backup_rounds: countWhere((round) => round.scattered_backup_count > 0),
   max_git_status_count: Math.max(...roundResults.map((round) => round.git_status_count_after ?? 0)),
@@ -242,6 +368,8 @@ Overall Status: ${summary.overall_status}
 - Repository Ready Rounds: ${summary.repository_ready_rounds}/${rounds}
 - Long-Term Readiness Ready Rounds: ${summary.long_term_ready_rounds}/${rounds}
 - Code Context Ready Rounds: ${summary.code_context_ready_rounds}/${rounds}
+- Release Gate Ready Rounds: ${summary.release_gate_ready_rounds}/${rounds}
+- GitHub Actions Failed Rounds: ${summary.github_actions_failed_rounds}/${rounds}
 - Backup Noise Rounds: ${summary.backup_noise_rounds}/${rounds}
 - Scattered Backup Rounds: ${summary.scattered_backup_rounds}/${rounds}
 - Max Git Status Count: ${summary.max_git_status_count}
@@ -251,6 +379,25 @@ Overall Status: ${summary.overall_status}
 | Round | Readiness | Git | GitHub CLI | Code Context | Backup Noise | Scattered Backups | Status Count |
 |---:|---|---|---|---|---:|---:|---:|
 ${roundResults.map((round) => `| ${round.round} | ${md(round.readiness_status)} | ${md(round.git)} | ${md(round.github_cli)} / ${md(round.github_cli_auth)} | ${md(round.code_context)} | ${round.backup_noise_count} | ${round.scattered_backup_count} | ${md(round.git_status_count_after)} |`).join('\n')}
+
+## GitHub Workflow / Release Gate
+
+- Release Gate Ready Rounds: ${summary.release_gate_ready_rounds}/${rounds}
+- GitHub Actions Failed Rounds: ${summary.github_actions_failed_rounds}/${rounds}
+
+| Round | Release Gate | Latest CI | Failure Logs | Release Blockers | Pull Request |
+|---:|---|---|---|---|---|
+${roundResults.map((round) => {
+  const gate = round.release_gate || {};
+  const latest = gate.ci?.latest_run;
+  const latestCi = latest
+    ? `${md(latest.workflow_name)} ${md(latest.status)} / ${md(latest.conclusion || 'no_conclusion')} ${latest.url ? `(${latest.url})` : ''}`
+    : md(gate.ci?.status);
+  const pr = gate.pr?.current_branch
+    ? `#${md(gate.pr.current_branch.number)} ${md(gate.pr.review_decision || gate.pr.current_branch.title || 'open')}`
+    : md(gate.pr?.status);
+  return `| ${round.round} | ${md(gate.status)} | ${latestCi} | ${md(gate.ci?.failure_log_command || 'none')} | ${md((gate.blockers || []).join(', ') || 'none')} | ${pr} |`;
+}).join('\n')}
 
 ## Decision
 
