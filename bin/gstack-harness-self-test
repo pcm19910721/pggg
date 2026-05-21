@@ -425,8 +425,8 @@ EOF
   assert_contains "$seed_dir/init.out" '"status": "ready"'
   assert_contains "$seed_content_dir/project__seeded__overview.md" "project_uid:"
   assert_contains "$seed_content_dir/project__seeded__overview.md" "repo_path: \"$seed_dir\""
-  assert_contains "$seed_content_dir/project__seeded__state.md" "Next recommended agent: Orchestrator"
-  assert_contains "$seed_content_dir/project__seeded__handoff.md" "Next recipe: R0 Restore / Resume Context"
+  assert_contains "$seed_content_dir/project__seeded__state.md" "Project State: seeded"
+  assert_contains "$seed_content_dir/project__seeded__handoff.md" "Handoff: seeded"
   GBRAIN_STORE_PATH="$seed_store" GBRAIN_CONTENT_DIR="$seed_content_dir" PATH="$FAKE_BIN:$PATH" "$seed_dir/.gstack/harness/bin/gstack-harness-remediate" --target "$seed_dir" > "$TMP_ROOT/seeded-remediate.out"
   assert_contains "$seed_content_dir/project__seeded__state.md" "project_uid:"
   assert_contains "$seed_content_dir/project__seeded__state.md" "repo_path: \"$seed_dir\""
@@ -866,6 +866,8 @@ main() {
   log "GStack Harness self-test"
   require_node
   setup_fake_tools
+  export HOME="$FAKE_HOME"
+  export PATH="$FAKE_BIN:$PATH"
   bash -n "$INIT"
   bash -n "$SCRIPT_DIR/pggg"
   bash -n "$SCRIPT_DIR/pcm-harness"
