@@ -4,9 +4,7 @@
 
 ## Verification
 
-- [ ] `npm test`
-- [ ] `npm run check:shell`
-- [ ] `bin/gstack-harness-self-test` or reason skipped:
+- [ ] `npm run verify` or reason skipped:
 
 ## Runtime Artifact Check
 
