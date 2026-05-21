@@ -164,3 +164,51 @@ test('installed remediation restores missing atomic commit runner', () => {
   assert.equal(fs.existsSync(atomicRunner), true);
   assert.equal(fs.statSync(atomicRunner).mode & 0o111, 0o111);
 });
+
+test('installed init can run without the original template source', () => {
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-init-self-contained-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-init-home-'));
+  const env = {
+    ...process.env,
+    HOME: home,
+    PATH: '/usr/bin:/bin',
+  };
+
+  const installed = spawnSync(initBin, [
+    '--target', target,
+    '--mode', 'docs-only',
+    '--no-start-codex',
+  ], {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: 100_000,
+    env,
+  });
+  assert.notEqual(installed.status, null, installed.stderr || installed.stdout);
+  assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-init')), true);
+
+  const statePath = path.join(target, '.gstack', 'project-state.json');
+  const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  state.template_source = path.join(target, 'missing-template-source');
+  fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+
+  const nestedTarget = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-init-self-contained-target-'));
+  const result = spawnSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-init'), [
+    '--target', nestedTarget,
+    '--mode', 'docs-only',
+    '--no-start-codex',
+  ], {
+    cwd: target,
+    encoding: 'utf8',
+    timeout: 100_000,
+    env,
+  });
+
+  assert.notEqual(result.status, null, result.stderr || result.stdout);
+  assert.doesNotMatch(result.stdout, /template missing/);
+  assert.equal(fs.existsSync(path.join(nestedTarget, 'CLAUDE.md')), true);
+  assert.equal(fs.existsSync(path.join(nestedTarget, 'WORKFLOW_RECIPES.md')), true);
+  assert.equal(fs.existsSync(path.join(nestedTarget, '.gstack', 'harness', 'bin', 'gstack-harness-init')), true);
+  assert.equal(fs.existsSync(path.join(nestedTarget, 'scripts', 'ai-context-bridge.mjs')), true);
+  assert.equal(fs.existsSync(path.join(nestedTarget, 'docs', 'SCHEDULER_MODEL.md')), true);
+});

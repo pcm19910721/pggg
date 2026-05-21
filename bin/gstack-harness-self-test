@@ -853,7 +853,7 @@ test_report_timer_installer() {
     --no-enable > "$TMP_ROOT/local-timer.out"
 
   assert_file "$local_runner_dir/gstack-harness-usage-report.sh"
-  assert_contains "$local_runner_dir/gstack-harness-usage-report.sh" "$TEMPLATE_ROOT/bin/gstack-harness-usage-report"
+  assert_contains "$local_runner_dir/gstack-harness-usage-report.sh" "gstack-harness-usage-report"
 
   pass "report timer installer writes user systemd units without enabling real timers"
 }

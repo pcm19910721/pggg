@@ -20,7 +20,7 @@ INIT="$SCRIPT_DIR/gstack-harness-init"
 
 is_complete_template_root() {
   local candidate_root
-  candidate_root="$(cd "$1/../.." 2>/dev/null && pwd || true)"
+  candidate_root="$(cd "$1/.." 2>/dev/null && pwd || true)"
   [ -n "$candidate_root" ] \
     && [ -f "$candidate_root/CLAUDE_MD_TEMPLATE.md" ] \
     && [ -f "$candidate_root/WORKFLOW_RECIPES.md" ] \
