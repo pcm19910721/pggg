@@ -36,6 +36,9 @@ function tempProject() {
 
 function installTimeoutGbrain(bin) {
   fs.mkdirSync(bin, { recursive: true });
+  const gstackRoot = path.join(bin, '.codex', 'skills', 'gstack');
+  fs.mkdirSync(gstackRoot, { recursive: true });
+  fs.writeFileSync(path.join(gstackRoot, 'SKILL.md'), '# test gstack skill\n');
   const gbrain = path.join(bin, 'gbrain');
   fs.writeFileSync(gbrain, `#!/usr/bin/env node
 const [command, slug] = process.argv.slice(2);
@@ -120,6 +123,8 @@ test('readiness reports gbrain get timeout separately from missing pages', () =>
     encoding: 'utf8',
     env: {
       ...process.env,
+      HOME: fakeBin,
+      GSTACK_GBRAIN_GET_TIMEOUT: '2s',
       PATH: `${fakeBin}:${process.env.PATH}`,
     },
   });
@@ -129,7 +134,7 @@ test('readiness reports gbrain get timeout separately from missing pages', () =>
   assert.equal(output.gbrain_core_missing.includes('project/readiness-test/code-context'), false);
   assert.equal(output.gbrain_core_timeout.includes('project/readiness-test/code-context'), true);
   assert.equal(output.warnings.includes('gbrain_core_pages_timeout'), true);
-  assert.equal(output.next_recommended_agent, 'Problem Handling Agent');
+  assert.equal(output.gstack, 'ready');
 });
 
 test('readiness includes workspace hygiene status from installed report', () => {
