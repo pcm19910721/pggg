@@ -153,6 +153,36 @@ function normalizeRun(runInfo = {}) {
   };
 }
 
+function releaseGateNextAction(gate) {
+  if (gate.status === 'not_configured') return 'configure release state before release evaluation';
+  if (gate.github_cli_status === 'missing') return 'install GitHub CLI before release';
+  if (gate.github_cli_status === 'unauthenticated') return 'authenticate GitHub CLI with gh auth login before release';
+  if (gate.blockers.includes('github_actions_failed')) {
+    return gate.ci.failure_log_command
+      ? `inspect failed CI logs with ${gate.ci.failure_log_command}, then fix CI before release`
+      : 'inspect failed CI logs with gh run view --log-failed, then fix CI before release';
+  }
+  if (gate.blockers.includes('github_actions_in_progress')) {
+    const id = gate.ci.latest_run?.database_id;
+    return id
+      ? `wait for CI with gh run watch ${id} --exit-status before release`
+      : 'wait for the latest GitHub Actions run before release';
+  }
+  if (gate.blockers.includes('github_actions_missing')) {
+    return 'configure or trigger GitHub Actions before release';
+  }
+  if (gate.blockers.includes('github_actions_unknown')) {
+    return 'inspect gh run list failure before release';
+  }
+  if (gate.blockers.includes('github_pr_blocked')) {
+    return 'address GitHub PR review blockers before release';
+  }
+  if (gate.blockers.length) {
+    return `resolve release blockers before release: ${gate.blockers.join(', ')}`;
+  }
+  return 'none';
+}
+
 function collectReleaseGate(readiness = {}) {
   const state = readJsonFile(path.join(targetDir, '.gstack', 'project-state.json'), {});
   const release = state.release || readiness.release || null;
@@ -164,6 +194,7 @@ function collectReleaseGate(readiness = {}) {
     blockers: unique(baseBlockers),
     remote_url: release?.remote_url || '',
     github_cli_status: githubCli.status || release?.github_cli_status || 'unknown',
+    next_action: '',
     ci: {
       status: release ? 'not_checked' : 'not_configured',
       latest_run: null,
@@ -180,12 +211,16 @@ function collectReleaseGate(readiness = {}) {
     },
   };
 
-  if (!release) return gate;
+  if (!release) {
+    gate.next_action = releaseGateNextAction(gate);
+    return gate;
+  }
 
   const canUseGh = gate.github_cli_status === 'ready'
     && (!githubCli.auth || githubCli.auth === 'authenticated');
   if (!canUseGh) {
     gate.status = gate.blockers.length ? 'blocked' : 'unknown';
+    gate.next_action = releaseGateNextAction(gate);
     return gate;
   }
 
@@ -247,6 +282,7 @@ function collectReleaseGate(readiness = {}) {
 
   gate.blockers = unique(gate.blockers);
   gate.status = gate.blockers.length ? 'blocked' : 'ready';
+  gate.next_action = releaseGateNextAction(gate);
   return gate;
 }
 
@@ -385,8 +421,8 @@ ${roundResults.map((round) => `| ${round.round} | ${md(round.readiness_status)} 
 - Release Gate Ready Rounds: ${summary.release_gate_ready_rounds}/${rounds}
 - GitHub Actions Failed Rounds: ${summary.github_actions_failed_rounds}/${rounds}
 
-| Round | Release Gate | Latest CI | Failure Logs | Release Blockers | Pull Request |
-|---:|---|---|---|---|---|
+| Round | Release Gate | Latest CI | Failure Logs | Release Blockers | Next Action | Pull Request |
+|---:|---|---|---|---|---|---|
 ${roundResults.map((round) => {
   const gate = round.release_gate || {};
   const latest = gate.ci?.latest_run;
@@ -396,7 +432,7 @@ ${roundResults.map((round) => {
   const pr = gate.pr?.current_branch
     ? `#${md(gate.pr.current_branch.number)} ${md(gate.pr.review_decision || gate.pr.current_branch.title || 'open')}`
     : md(gate.pr?.status);
-  return `| ${round.round} | ${md(gate.status)} | ${latestCi} | ${md(gate.ci?.failure_log_command || 'none')} | ${md((gate.blockers || []).join(', ') || 'none')} | ${pr} |`;
+  return `| ${round.round} | ${md(gate.status)} | ${latestCi} | ${md(gate.ci?.failure_log_command || 'none')} | ${md((gate.blockers || []).join(', ') || 'none')} | ${md(gate.next_action || 'none')} | ${pr} |`;
 }).join('\n')}
 
 ## Decision

@@ -246,6 +246,7 @@ esac
   assert.equal(releaseGate.ci.latest_run.database_id, 12345);
   assert.equal(releaseGate.ci.latest_run.conclusion, 'failure');
   assert.equal(releaseGate.ci.failure_log_command, 'gh run view 12345 --log-failed');
+  assert.equal(releaseGate.next_action, 'inspect failed CI logs with gh run view 12345 --log-failed, then fix CI before release');
   assert.deepEqual(releaseGate.blockers.sort(), ['github_actions_failed', 'no_deploy_target']);
   assert.equal(releaseGate.pr.current_branch.number, 77);
 
@@ -255,5 +256,6 @@ esac
   assert.match(report, /GitHub Actions Failed Rounds: 1\/1/);
   assert.match(report, /github_actions_failed, no_deploy_target/);
   assert.match(report, /gh run view 12345 --log-failed/);
+  assert.match(report, /inspect failed CI logs with gh run view 12345 --log-failed, then fix CI before release/);
   assert.match(report, /https:\/\/github\.com\/acme\/release-test\/actions\/runs\/12345/);
 });
