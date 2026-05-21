@@ -1065,7 +1065,7 @@ These agents are installed by default and can be configured or replaced by proje
 | Reality Test Agent | Real app/browser verification. | health, browse, qa, qa-only |
 | Review Agent | Pre-landing code review. | review |
 | Security/Perf Agent | Security and performance hardening. | cso, benchmark |
-| Release Agent | PR, deploy, canary, release docs. | ship, land-and-deploy, canary, document-release |
+| Release Agent | PR, deploy, canary, release docs; GitHub remote/CI/PR/run via \`gh\` CLI. | gh repo/pr/run/workflow, ship, land-and-deploy, canary, document-release |
 | Maintenance Agent | Debugging, root cause, restore, learning, retro. | investigate, context-save, context-restore, learn, retro |
 
 ## Project-Defined Starter Agents

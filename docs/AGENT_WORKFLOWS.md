@@ -600,12 +600,13 @@ docs/PERFORMANCE_REPORT.md
 
 Layer: default_replaceable
 
-负责：发版、PR、部署、线上验证。
+负责：发版、PR、部署、线上验证。Release Agent 必须使用 `gh` CLI 处理 GitHub remote、CI、PR 和 workflow run；本地 repo 状态、diff、add、commit 仍使用 `git`。
 
 组合：
 
 ```text
-/setup-deploy 如果未配置
+GitHub Workflow / Release Gate：gh auth status、gh repo view、gh pr status/view/create、gh run list/view/watch/log-failed
+→ /setup-deploy 如果未配置
 → /ship
 → /land-and-deploy
 → /canary
@@ -620,6 +621,7 @@ PR
 CHANGELOG
 部署状态
 docs/RELEASE_STATUS.md
+GitHub Actions run URL 和当前 HEAD 绑定的 CI 结论
 上线后 canary 结果
 ```
 

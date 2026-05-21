@@ -1062,6 +1062,7 @@ Deployment config: ready
 ```text
 已有代码变更：R0.5 提交前影响面 bridge postchange / GitNexus impact
 → /landing-report
+→ R10-GH GitHub Workflow / Release Gate
 → /setup-deploy 如果部署信息缺失
 → /ship
 → /land-and-deploy
@@ -1097,6 +1098,104 @@ Next recommended agent: Maintenance Agent 或 Retro
 
 ```text
 如果用户说“合并并部署”但 gates 不满足，总控必须阻断并解释缺什么。
+```
+
+## R10-GH: GitHub Workflow / Release Gate
+
+适用：
+
+```text
+需要检查 GitHub remote、Actions、PR、workflow run 或 release blocker
+准备 push、PR、merge、ship、land-and-deploy
+用户问 CI 是否通过、PR 状态如何、GitHub 上发生了什么
+```
+
+核心原则：
+
+```text
+GitHub 远端操作统一使用 gh CLI。
+本地 repo 状态、diff、add、commit 仍使用 git。
+gh 缺失或未登录时不允许继续 PR、CI 结论、merge、deploy 或 release。
+不能用 GitHub 网页手工查看替代 harness evidence，除非 gh/API 故障并记录 fallback。
+```
+
+前置检查：
+
+```bash
+gh auth status
+gh repo view --json nameWithOwner,defaultBranchRef,url
+```
+
+标准流程：
+
+```text
+读取 .gstack/project-state.json 的 github_cli 和 release 字段
+→ gh auth status
+→ gh repo view --json nameWithOwner,defaultBranchRef,url
+→ 本地 git status / git rev-parse HEAD / git branch --show-current
+→ 如果需要 PR：gh pr status；已有 PR 用 gh pr view --json state,mergeStateStatus,reviewDecision,statusCheckRollup,url
+→ 如果需要创建 PR：gh pr create，正文必须引用 health/review/code-context evidence
+→ 如果需要 CI：gh run list --branch <branch> --limit 5 --json databaseId,headSha,status,conclusion,workflowName,url
+→ 对当前 HEAD run：gh run view <run-id> --json status,conclusion,jobs,url,headSha
+→ 等待 CI：gh run watch <run-id> --exit-status
+→ CI 失败：gh run view <run-id> --log-failed，记录失败 job、step、日志摘要和 URL
+→ 成功后更新 PROJECT_STATE.md / .gstack/project-state.json release evidence
+```
+
+常用命令清单：
+
+```bash
+gh auth status
+gh repo view --json nameWithOwner,defaultBranchRef,url
+gh pr status
+gh pr list --state open --json number,title,headRefName,baseRefName,state,url
+gh pr view --json state,mergeStateStatus,reviewDecision,statusCheckRollup,url
+gh pr create
+gh run list --branch <branch> --limit 5 --json databaseId,headSha,status,conclusion,workflowName,url
+gh run view <run-id> --json status,conclusion,jobs,url,headSha
+gh run watch <run-id> --exit-status
+gh run view <run-id> --log-failed
+```
+
+release blockers：
+
+```text
+github_cli_missing: gh 不在 PATH，不能继续 GitHub remote/CI/PR/release。
+github_cli_unauthenticated: gh auth status 失败，不能继续 GitHub remote/CI/PR/release。
+no_remote_repository: 没有 remote.origin.url，不能创建 PR、检查远端 CI 或 release。
+github_actions_missing: 目标 repo 没有可用 workflow，不能宣称 CI green。
+github_actions_in_progress: 当前 HEAD 的 run 仍在跑，release 等待。
+github_actions_failed: 当前 HEAD 的 run 失败，必须抓 gh run view --log-failed 并派发 Maintenance/Problem Handling。
+github_pr_blocked: PR mergeStateStatus、reviewDecision 或 required checks 未满足。
+github_api_unstable: gh/API transient failure；重试一次，仍失败则记录 fallback artifact 和 blocker。
+```
+
+产物：
+
+```text
+GitHub repo URL
+PR URL（如果有）
+Actions run URL
+CI conclusion tied to current HEAD
+failed job/step/log summary（失败时）
+release blockers / warnings
+PROJECT_STATE.md release evidence
+```
+
+状态：
+
+```text
+Release status: not_started | blocked_by_environment | ci_pending | ci_failed | ready | completed
+Deployment: blocked | not_started | deployed | failed
+Next recommended agent: Release Agent、Problem Handling Agent 或 Maintenance Agent
+```
+
+调教钩子：
+
+```text
+如果同类 GitHub failure 反复出现，升级为 System Tuning issue。
+如果 agent 又用网页或口头描述替代 gh evidence，记录 workflow violation 并补 prompt/recipe。
+如果 CI warning 将在未来日期变成 blocker，创建 scheduled candidate，不自动启用 recurring work。
 ```
 
 ## R11: Post-Deploy Canary / Incident

@@ -136,6 +136,25 @@ test('init records GitHub CLI as the standard remote operations capability', () 
   const codexPrompt = fs.readFileSync(path.join(target, 'docs', 'CODEX_START_PROMPT.md'), 'utf8');
   assert.match(codexPrompt, /GitHub remote\/CI\/PR\/run 操作必须使用 `gh` CLI/);
   assert.match(codexPrompt, /本地 repo 状态、diff、add、commit 仍使用 `git`/);
+
+  const workflowRecipes = fs.readFileSync(path.join(target, 'WORKFLOW_RECIPES.md'), 'utf8');
+  assert.match(workflowRecipes, /## R10-GH: GitHub Workflow \/ Release Gate/);
+  assert.match(workflowRecipes, /gh repo view/);
+  assert.match(workflowRecipes, /gh run list/);
+  assert.match(workflowRecipes, /gh run view/);
+  assert.match(workflowRecipes, /gh run watch/);
+  assert.match(workflowRecipes, /gh pr status/);
+  assert.match(workflowRecipes, /gh pr view/);
+  assert.match(workflowRecipes, /gh pr create/);
+  assert.match(workflowRecipes, /github_cli_missing/);
+  assert.match(workflowRecipes, /github_actions_failed/);
+
+  const agentWorkflows = fs.readFileSync(path.join(target, 'docs', 'AGENT_WORKFLOWS.md'), 'utf8');
+  assert.match(agentWorkflows, /GitHub Workflow \/ Release Gate/);
+  assert.match(agentWorkflows, /Release Agent 必须使用 `gh` CLI/);
+
+  const team = fs.readFileSync(path.join(target, '.gstack', 'harness', 'agents', 'TEAM.md'), 'utf8');
+  assert.match(team, /Release Agent.*GitHub remote\/CI\/PR\/run via `gh` CLI/);
 });
 
 test('init centralizes reinstall backups under ignored harness backup directory', () => {
