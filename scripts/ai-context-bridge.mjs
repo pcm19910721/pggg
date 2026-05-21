@@ -1763,7 +1763,24 @@ function mergeWorkspaceHygieneGate(sessionRisk, workspaceHygiene) {
 async function commandBaseline() {
   const config = await loadConfig();
   if (!isGitRepo(config.repo_path)) {
-    throw new Error(`repo_path is not a git repository: ${config.repo_path}`);
+    const baseline = {
+      schema: 'gstack-harness.change_baseline.v1',
+      project_id: config.project_id,
+      repo_path: config.repo_path,
+      branch: 'not-a-git-repo',
+      head: null,
+      status: '',
+      dirty_files: [],
+      repository_state: {
+        status: 'not_git_repo',
+        fallback: 'file_manifest',
+        message: 'Git session baseline is unavailable until this bundle is initialized as a git repository.',
+      },
+      generated_at: new Date().toISOString(),
+    };
+    await writeJson(CHANGE_BASELINE_PATH, baseline);
+    console.log(JSON.stringify(baseline, null, 2));
+    return;
   }
 
   const status = getStatus(config.repo_path);
@@ -1783,13 +1800,86 @@ async function commandBaseline() {
 
 async function commandPostchange(args) {
   const config = await loadConfig();
-  if (!isGitRepo(config.repo_path)) {
-    throw new Error(`repo_path is not a git repository: ${config.repo_path}`);
-  }
-
   const id = args.runId || runId();
   const dir = path.join(ROOT, '.ai-context', 'runs', id);
   await fs.mkdir(dir, { recursive: true });
+
+  if (!isGitRepo(config.repo_path)) {
+    const scope = args.scope || 'unstaged';
+    const summary = {
+      repo_path: config.repo_path,
+      branch: 'not-a-git-repo',
+      git_head: null,
+      indexed: false,
+      stale: false,
+      indexed_at: null,
+      last_commit: null,
+      stats: null,
+    };
+    const detectText = 'GitNexus detect-changes skipped: repo_path is not a git repository.\n';
+    const tests = collectTestEvidence(args);
+    await fs.writeFile(path.join(dir, 'detect-changes.txt'), detectText, 'utf-8');
+    await writeJson(path.join(dir, 'run.json'), {
+      project_id: config.project_id,
+      run_id: id,
+      repo_path: config.repo_path,
+      branch: 'not-a-git-repo',
+      scope,
+      commit_before: null,
+      commit_after: 'not-a-git-repo',
+      working_tree_status: 'unknown',
+      detect_changes_ok: false,
+      detect_risk: 'unknown',
+      raw_detect_risk: 'unknown',
+      harness_scope_risk: 'unknown',
+      risk: 'unknown',
+      risk_source: 'non_git_fallback',
+      commit_gate: 'blocked',
+      baseline_path: null,
+      baseline_head: null,
+      preexisting_dirty_worktree: false,
+      session_changed_files: [],
+      preexisting_dirty_files: [],
+      warnings: ['not_git_repo', 'gitnexus_unavailable_without_git'],
+      workspace_hygiene: readWorkspaceHygieneReport(),
+      impact_risks: [],
+      impact_targets: [],
+      tests,
+      repository_state: {
+        status: 'not_git_repo',
+        fallback: 'file_manifest',
+        message: 'GitNexus postchange is unavailable until this bundle is initialized as a git repository.',
+      },
+      gbrain_slug: `artifact/${config.project_id}/impact-analysis/${id}`,
+      generated_at: new Date().toISOString(),
+    });
+    await writeJson(path.join(ROOT, '.ai-context', 'gitnexus-status.json'), summary);
+    await updateCodeContextArtifacts(config, summary, 'postchange', {
+      run_id: id,
+      detect_changes_ok: false,
+      detect_risk: 'unknown',
+      raw_detect_risk: 'unknown',
+      harness_scope_risk: 'unknown',
+      risk_source: 'non_git_fallback',
+      commit_gate: 'blocked',
+      warnings: ['not_git_repo', 'gitnexus_unavailable_without_git'],
+      tests,
+      risk: 'unknown',
+      status: 'missing',
+    });
+    console.log(JSON.stringify({
+      project_id: config.project_id,
+      run_id: id,
+      status: 'missing',
+      repository_state: {
+        status: 'not_git_repo',
+        fallback: 'file_manifest',
+      },
+      risk: 'unknown',
+      commit_gate: 'blocked',
+    }, null, 2));
+    return;
+  }
 
   const scope = args.scope || 'unstaged';
   const before = getHead(config.repo_path);

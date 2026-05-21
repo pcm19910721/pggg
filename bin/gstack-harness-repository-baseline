@@ -1,0 +1,452 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+gstack-harness-repository-baseline - initialize the standard git baseline gate
+
+Usage:
+  gstack-harness-repository-baseline [--target DIR] [--yes] [--json]
+
+Default behavior scans and reports the repository baseline requirement without
+initializing git. Pass --yes only after user confirmation to create the initial
+git baseline commit and unlock long-term harness readiness.
+EOF
+}
+
+TARGET="."
+YES=0
+PRINT_JSON=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --target)
+      TARGET="${2:-}"
+      shift 2
+      ;;
+    --yes|--confirm)
+      YES=1
+      shift
+      ;;
+    --json)
+      PRINT_JSON=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "ERROR: node is required for repository baseline" >&2
+  exit 2
+fi
+
+TARGET_DIR="$(mkdir -p "$TARGET" && cd "$TARGET" && pwd)"
+
+TARGET_DIR="$TARGET_DIR" YES="$YES" PRINT_JSON="$PRINT_JSON" node <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const { spawnSync } = require('child_process');
+
+const target = process.env.TARGET_DIR;
+const yes = process.env.YES === '1';
+const printJson = process.env.PRINT_JSON === '1';
+const now = new Date().toISOString();
+
+const paths = {
+  state: path.join(target, '.gstack', 'project-state.json'),
+  summary: path.join(target, '.gstack', 'repository-baseline.json'),
+  report: path.join(target, 'docs', 'REPOSITORY_BASELINE_REPORT.md'),
+};
+
+function run(bin, args, opts = {}) {
+  const result = spawnSync(bin, args, {
+    cwd: opts.cwd || target,
+    encoding: 'utf8',
+    env: opts.env || process.env,
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  return {
+    ok: result.status === 0,
+    status: result.status,
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+    error: result.error,
+  };
+}
+
+function readJson(file, fallback = {}) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+function rel(file) {
+  return path.relative(target, file).split(path.sep).join('/');
+}
+
+function slug(value) {
+  return String(value || 'project')
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/-+$/g, '')
+    || 'project';
+}
+
+const projectId = slug(path.basename(target));
+
+function isGitRepo() {
+  return run('git', ['rev-parse', '--is-inside-work-tree']).ok;
+}
+
+function walk(dir, out = []) {
+  let entries = [];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    const relative = rel(full);
+    if (entry.isDirectory()) {
+      if (['.git', 'node_modules'].includes(entry.name)) continue;
+      walk(full, out);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    let stat;
+    try {
+      stat = fs.statSync(full);
+    } catch {
+      continue;
+    }
+    out.push({ path: relative, size_bytes: stat.size });
+  }
+  return out;
+}
+
+function sensitiveReason(filePath) {
+  const base = path.basename(filePath).toLowerCase();
+  if (filePath === '.env' || filePath.startsWith('.env.')) return 'environment secret file';
+  if (base === 'mima.txt') return 'password file name';
+  if (/\.(pem|key|p12|pfx)$/i.test(base)) return 'private key material';
+  if (filePath === 'server_materials/10-access' || filePath.startsWith('server_materials/10-access/')) {
+    return 'server access material';
+  }
+  if (/(^|[._-])(token|secret|password|passwd|apikey|api-key|credential|credentials)([._-]|$)/i.test(base)) {
+    return 'sensitive file name';
+  }
+  return '';
+}
+
+function gitignoreSuggestions(sensitivePaths) {
+  const suggestions = new Set([
+    '.gitnexus/',
+    '.gstack/usage-runs/',
+    '.ai-context/runs/',
+    '.env',
+    '.env.*',
+    '*.pem',
+    '*.key',
+    '*.p12',
+    '*.pfx',
+    '__pycache__/',
+    '*.pyc',
+  ]);
+  for (const item of sensitivePaths) suggestions.add(item.path);
+  return Array.from(suggestions).sort();
+}
+
+function updateMarkdownState(state) {
+  const file = path.join(target, 'PROJECT_STATE.md');
+  if (!fs.existsSync(file)) return;
+  let text = fs.readFileSync(file, 'utf8');
+  function replaceOrAppend(pattern, line, section) {
+    if (pattern.test(text)) {
+      text = text.replace(pattern, line);
+      return;
+    }
+    if (text.includes(section)) {
+      text = text.replace(section, `${section}\n${line}`);
+      return;
+    }
+    text = `${text.trimEnd()}\n${line}\n`;
+  }
+  replaceOrAppend(/^- Repository: .*$/m, `- Repository: ${state.repository.status}`, '## Repository Baseline');
+  replaceOrAppend(/^- Git state: .*$/m, '- Git state: ready', '## Repository Baseline');
+  replaceOrAppend(/^- Code Context: .*$/m, `- Code Context: ${state.quality_gates?.code_context || 'ready'}`, '## Repository Baseline');
+  replaceOrAppend(/^- Long-term readiness: .*$/m, `- Long-term readiness: ${state.long_term_readiness.status}`, '## Repository Baseline');
+  replaceOrAppend(/^- Next recommended agent: .*$/m, `- Next recommended agent: ${state.next_recommended_agent}`, '## Current');
+  replaceOrAppend(/^- Next recommended recipe: .*$/m, `- Next recommended recipe: ${state.next_recommended_recipe}`, '## Current');
+  fs.writeFileSync(file, text, 'utf8');
+}
+
+function updateReadyState(summary) {
+  const state = readJson(paths.state, {});
+  state.project_id = projectId;
+  state.repository = {
+    ...(state.repository || {}),
+    status: 'ready',
+    git: 'ready',
+    branch: summary.git.branch,
+    baseline_required: false,
+    baseline_commit: summary.git.head,
+    next_action: 'none',
+  };
+  state.long_term_readiness = {
+    status: 'ready',
+    blockers: [],
+  };
+  state.quality_gates = {
+    ...(state.quality_gates || {}),
+    code_context: summary.ai_context_baseline.status === 'ready' || summary.gitnexus.status === 'ready'
+      ? 'ready'
+      : 'baseline_ready',
+  };
+  state.artifacts = {
+    ...(state.artifacts || {}),
+    repository_baseline_report: 'docs/REPOSITORY_BASELINE_REPORT.md',
+    repository_baseline_json: '.gstack/repository-baseline.json',
+  };
+  state.warnings = Array.isArray(state.warnings)
+    ? state.warnings.filter((warning) => warning !== 'not_git_repo')
+    : [];
+  state.blockers = Array.isArray(state.blockers)
+    ? state.blockers.filter((blocker) => blocker !== 'needs_git_baseline')
+    : [];
+  state.next_recommended_agent = 'Orchestrator';
+  state.next_recommended_recipe = 'R0 Restore / Resume Context';
+  writeJson(paths.state, state);
+  updateMarkdownState(state);
+}
+
+function repairAiContextProject() {
+  const file = path.join(target, '.ai-context', 'project.json');
+  const existing = readJson(file, {});
+  const next = {
+    ...existing,
+    project_id: projectId,
+    repo_path: target,
+    code_context_provider: existing.code_context_provider || 'gitnexus',
+    gitnexus: {
+      ...(existing.gitnexus || {}),
+      repo: projectId,
+    },
+  };
+  writeJson(file, next);
+}
+
+function ensureGitignore(summary) {
+  const file = path.join(target, '.gitignore');
+  let existing = '';
+  try {
+    existing = fs.readFileSync(file, 'utf8');
+  } catch {}
+  const lines = new Set(existing.split(/\r?\n/).map((line) => line.trim()).filter(Boolean));
+  for (const item of summary.gitignore_suggestions) lines.add(item);
+  fs.writeFileSync(file, `${Array.from(lines).sort().join('\n')}\n`, 'utf8');
+}
+
+function writeReport(summary) {
+  fs.mkdirSync(path.dirname(paths.report), { recursive: true });
+  const sensitive = summary.sensitive_paths.length
+    ? summary.sensitive_paths.map((item) => `- ${item.path}: ${item.reason}`).join('\n')
+    : 'None';
+  const suggestions = summary.gitignore_suggestions.length
+    ? summary.gitignore_suggestions.map((item) => `- ${item}`).join('\n')
+    : 'None';
+  const report = `# Repository Baseline Report
+
+Generated: ${now}
+Status: ${summary.status}
+Target: ${target}
+
+## Repository
+
+- Git before: ${summary.git.before}
+- Initialized: ${summary.git.initialized}
+- Branch: ${summary.git.branch || 'none'}
+- Head: ${summary.git.head || 'none'}
+
+## Sensitive Paths
+
+${sensitive}
+
+## Gitignore Suggestions
+
+${suggestions}
+
+## Tooling
+
+- GitNexus analyze: ${summary.gitnexus.status}
+- AI context baseline: ${summary.ai_context_baseline.status}
+`;
+  fs.writeFileSync(paths.report, report, 'utf8');
+}
+
+function writeArtifacts(summary) {
+  writeJson(paths.summary, summary);
+  writeReport(summary);
+}
+
+function output(summary, exitCode) {
+  writeArtifacts(summary);
+  if (printJson) {
+    process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+  } else {
+    process.stdout.write(`Repository baseline: ${summary.status}\n`);
+    process.stdout.write(`Report: docs/REPOSITORY_BASELINE_REPORT.md\n`);
+  }
+  process.exit(exitCode);
+}
+
+function commitIfNeeded(message) {
+  const add = run('git', ['add', '-A']);
+  if (!add.ok) return { ok: false, status: add.status, error: add.stderr || add.stdout };
+  const diff = run('git', ['diff', '--cached', '--quiet']);
+  if (diff.status === 0) return { ok: true, committed: false };
+  const commit = run('git', ['commit', '-m', message]);
+  return {
+    ok: commit.ok,
+    committed: commit.ok,
+    status: commit.status,
+    error: commit.stderr || commit.stdout,
+  };
+}
+
+const files = walk(target);
+const sensitivePaths = files
+  .map((file) => ({ ...file, reason: sensitiveReason(file.path) }))
+  .filter((file) => file.reason)
+  .map(({ path: filePath, reason, size_bytes }) => ({ path: filePath, reason, size_bytes }));
+
+const summary = {
+  schema: 'gstack-harness.repository_baseline.v1',
+  generated_at: now,
+  target,
+  status: 'requires_confirmation',
+  repository: {
+    status: 'needs_git_baseline',
+  },
+  git: {
+    before: isGitRepo() ? 'ready' : 'missing',
+    initialized: false,
+    branch: '',
+    head: '',
+  },
+  sensitive_paths: sensitivePaths,
+  gitignore_suggestions: gitignoreSuggestions(sensitivePaths),
+  gitnexus: {
+    status: 'not_run',
+  },
+  ai_context_baseline: {
+    status: 'not_run',
+  },
+};
+
+if (summary.git.before === 'ready') {
+  summary.status = 'already_git_repository';
+  summary.repository.status = 'ready';
+  summary.git.branch = run('git', ['branch', '--show-current']).stdout.trim() || 'unknown';
+  summary.git.head = run('git', ['rev-parse', 'HEAD']).stdout.trim();
+  output(summary, 0);
+}
+
+if (sensitivePaths.length) {
+  summary.status = 'blocked_sensitive_paths';
+  output(summary, 1);
+}
+
+if (!yes) {
+  output(summary, 1);
+}
+
+repairAiContextProject();
+ensureGitignore(summary);
+
+let result = run('git', ['init']);
+if (!result.ok) {
+  summary.status = 'git_init_failed';
+  summary.git.error = result.stderr || result.stdout;
+  output(summary, 1);
+}
+summary.git.initialized = true;
+
+if (!run('git', ['config', 'user.email']).ok) {
+  run('git', ['config', 'user.email', 'gstack-harness@example.invalid']);
+}
+if (!run('git', ['config', 'user.name']).ok) {
+  run('git', ['config', 'user.name', 'GStack Harness']);
+}
+
+result = commitIfNeeded('chore: establish repository baseline');
+if (!result.ok) {
+  summary.status = 'git_baseline_commit_failed';
+  summary.git.error = result.error;
+  output(summary, 1);
+}
+
+summary.git.branch = run('git', ['branch', '--show-current']).stdout.trim() || 'master';
+summary.git.head = run('git', ['rev-parse', 'HEAD']).stdout.trim();
+
+const analyze = run('gitnexus', ['analyze', '--skip-agents-md', '--no-stats']);
+if (analyze.ok) {
+  summary.gitnexus = {
+    status: 'ready',
+    exit_code: analyze.status,
+  };
+} else if (analyze.error && analyze.error.code === 'ENOENT') {
+  summary.gitnexus = {
+    status: 'skipped_missing_gitnexus',
+  };
+} else {
+  summary.gitnexus = {
+    status: 'failed',
+    exit_code: analyze.status,
+  };
+}
+
+const bridge = path.join(target, 'scripts', 'ai-context-bridge.mjs');
+if (fs.existsSync(bridge)) {
+  const baseline = run(process.execPath, [bridge, 'baseline']);
+  summary.ai_context_baseline = {
+    status: baseline.ok ? 'ready' : 'failed',
+    exit_code: baseline.status,
+  };
+} else {
+  summary.ai_context_baseline = {
+    status: 'skipped_missing_bridge',
+  };
+}
+
+summary.status = 'ready';
+summary.repository.status = 'ready';
+updateReadyState(summary);
+writeArtifacts(summary);
+
+result = commitIfNeeded('chore: record repository baseline evidence');
+if (!result.ok) {
+  summary.status = 'baseline_evidence_commit_failed';
+  summary.git.error = result.error;
+  output(summary, 1);
+}
+const finalAnalyze = run('gitnexus', ['analyze', '--skip-agents-md', '--no-stats']);
+void finalAnalyze;
+output(summary, 0);
+NODE

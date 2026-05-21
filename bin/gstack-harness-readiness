@@ -310,7 +310,7 @@ function writeJson(file, value) {
 }
 
 function findRuntimeRoot() {
-  const manifestFiles = ['package.json', 'pyproject.toml', 'go.mod', 'Cargo.toml', 'Makefile'];
+  const manifestFiles = ['package.json', 'pyproject.toml', 'go.mod', 'Cargo.toml', 'Makefile', 'web_app.py', 'app.py', 'main.py', 'run_web.ps1', 'run_web.bat'];
   const candidateDirs = ['', 'backend', 'frontend', 'app', 'api', 'server', 'web'];
   for (const rel of candidateDirs) {
     const dir = path.join(target, rel);
@@ -396,6 +396,14 @@ function detectRuntime(mode) {
   } else if (fs.existsSync(path.join(root, 'Makefile'))) {
     runtime.install = `${prefix}make install`;
     runtime.test = `${prefix}make test`;
+  } else if (fs.existsSync(path.join(root, 'web_app.py')) || fs.existsSync(path.join(root, 'app.py')) || fs.existsSync(path.join(root, 'main.py'))) {
+    const entry = fs.existsSync(path.join(root, 'web_app.py'))
+      ? 'web_app.py'
+      : (fs.existsSync(path.join(root, 'app.py')) ? 'app.py' : 'main.py');
+    runtime.install = 'not_required';
+    runtime.dev = `${prefix}python3 ${entry}`;
+    runtime.test = `${prefix}python3 -m py_compile *.py modules/*/service.py apps/server/*.py`;
+    runtime.local_url = 'http://127.0.0.1:8787';
   }
 
   runtime.status = Object.values(runtime).some(Boolean) ? 'ready' : 'missing_commands';
@@ -506,7 +514,21 @@ if (runtime.status === 'missing_commands' && mode === 'app') warnings.push('runt
 if (env.GIT_STATUS !== 'ready' && mode === 'app') warnings.push('not_git_repo');
 if (env.BROWSE_STATUS !== 'ready') warnings.push('browse_missing');
 
-const codeContextStatus = readCodeContextStatus(state);
+const repositoryNeedsBaseline = env.GIT_STATUS !== 'ready' && mode === 'app';
+const repository = {
+  ...(state.repository || {}),
+  status: repositoryNeedsBaseline ? 'needs_git_baseline' : 'ready',
+  git: env.GIT_STATUS,
+  branch: env.BRANCH,
+  baseline_required: repositoryNeedsBaseline,
+  next_action: repositoryNeedsBaseline ? 'initialize git baseline after user confirmation' : 'none',
+};
+const longTermReadiness = {
+  ...(state.long_term_readiness || {}),
+  status: repositoryNeedsBaseline ? 'blocked_until_git' : 'ready',
+  blockers: repositoryNeedsBaseline ? ['needs_git_baseline'] : [],
+};
+const codeContextStatus = repositoryNeedsBaseline ? 'blocked_until_git' : readCodeContextStatus(state);
 const workspaceHygiene = readWorkspaceHygiene(state);
 let verdict = 'ready';
 if (blockers.length) verdict = 'blocked';
@@ -532,6 +554,9 @@ const needsFoundationRemediation = verdict === 'blocked' || warnings.some((warni
 if (needsFoundationRemediation) {
   nextAgent = 'Foundation Remediation Agent';
   nextRecipe = 'R-0.5 Foundation Remediation';
+} else if (repositoryNeedsBaseline) {
+  nextAgent = 'Foundation Remediation Agent';
+  nextRecipe = 'Repository Baseline Gate';
 } else if (verdict !== 'ready') {
   nextAgent = 'Problem Handling Agent';
   nextRecipe = 'Problem Handling preflight, then R0 Restore / Resume Context';
@@ -543,6 +568,10 @@ if (needsFoundationRemediation) {
 ) {
   nextAgent = 'Problem Handling Agent';
   nextRecipe = 'Problem Handling preflight, then R0 Restore / Resume Context';
+}
+if (repositoryNeedsBaseline) {
+  nextAgent = 'Foundation Remediation Agent';
+  nextRecipe = 'Repository Baseline Gate';
 }
 
 const nextState = { ...state };
@@ -573,6 +602,8 @@ nextState.foundation = {
   last_readiness_check: env.GENERATED_AT,
   problem_handling_required: ['timeout', 'failed'].includes(env.GBRAIN_QUERY_STATUS),
 };
+nextState.repository = repository;
+nextState.long_term_readiness = longTermReadiness;
 function mergeRuntimeValue(nextValue, previousValue) {
   const hasPrevious = previousValue !== undefined && previousValue !== null && previousValue !== '';
   if (hasPrevious && (nextValue === undefined || nextValue === null || nextValue === '' || nextValue === 'not_required')) {
@@ -669,6 +700,8 @@ Verdict: ${verdict}
 | gstack memory sync | ${env.GBRAIN_SYNC_MODE} | gstack-config gbrain_sync_mode |
 | project protocol | ready | harness state and reports present |
 | git state | ${env.GIT_STATUS} | branch: ${env.BRANCH} |
+| repository baseline | ${repository.status} | ${repository.next_action} |
+| long-term readiness | ${longTermReadiness.status} | blockers: ${mdList(longTermReadiness.blockers)} |
 | runtime | ${runtime.status} | mode: ${mode}; test: ${runtime.test || ''}; dev: ${runtime.dev || ''} |
 | code context | ${codeContextStatus} | docs/CODE_CONTEXT_REPORT.md / .ai-context/gitnexus-status.json |
 | workspace hygiene | ${workspaceHygiene.status} | commit gate: ${workspaceHygiene.commit_gate}; report: ${workspaceHygiene.report} |
@@ -700,6 +733,9 @@ if (!env.DRY_RUN || env.DRY_RUN !== '1') {
     md = replaceOrAppend(md, /^- gbrain query: .*$/m, `- gbrain query: ${env.GBRAIN_QUERY_STATUS}`, '## Foundation');
     md = replaceOrAppend(md, /^- Runtime: .*$/m, `- Runtime: ${runtime.status}`, '## Foundation');
     md = replaceOrAppend(md, /^- Runners: .*$/m, `- Runners: ${env.BROWSE_STATUS}`, '## Foundation');
+    md = replaceOrAppend(md, /^- Repository: .*$/m, `- Repository: ${repository.status}`, '## Repository Baseline');
+    md = replaceOrAppend(md, /^- Git state: .*$/m, `- Git state: ${env.GIT_STATUS}`, '## Repository Baseline');
+    md = replaceOrAppend(md, /^- Long-term readiness: .*$/m, `- Long-term readiness: ${longTermReadiness.status}`, '## Repository Baseline');
     md = replaceOrAppend(md, /^- Foundation Readiness: .*$/m, `- Foundation Readiness: ${verdict}`, '## Quality Gates');
     md = replaceOrAppend(md, /^- Code Context: .*$/m, `- Code Context: ${codeContextStatus}`, '## Quality Gates');
     md = replaceOrAppend(md, /^- Next recommended agent: .*$/m, `- Next recommended agent: ${nextAgent}`, '## Current');
@@ -723,6 +759,8 @@ const summary = {
   gbrain_query: env.GBRAIN_QUERY_STATUS,
   gstack: env.GSTACK_STATUS,
   git: env.GIT_STATUS,
+  repository,
+  long_term_readiness: longTermReadiness,
   runtime: runtime.status,
   code_context: codeContextStatus,
   workspace_hygiene: workspaceHygiene,

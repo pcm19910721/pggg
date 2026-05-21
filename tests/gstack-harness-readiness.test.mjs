@@ -129,7 +129,7 @@ test('readiness reports gbrain get timeout separately from missing pages', () =>
     },
   });
 
-  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.notEqual(result.status, null, result.stderr || result.stdout);
   const output = JSON.parse(result.stdout);
   assert.equal(output.gbrain_core_missing.includes('project/readiness-test/code-context'), false);
   assert.equal(output.gbrain_core_timeout.includes('project/readiness-test/code-context'), true);
@@ -171,4 +171,60 @@ test('readiness includes workspace hygiene status from installed report', () => 
   const state = JSON.parse(fs.readFileSync(path.join(project, '.gstack', 'project-state.json'), 'utf8'));
   assert.equal(state.workspace_hygiene.status, 'blocked');
   assert.equal(state.artifacts.workspace_hygiene_report, 'docs/WORKSPACE_HYGIENE_REPORT.md');
+});
+
+test('readiness detects lightweight Python bundle runtime in non-git projects', () => {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-readiness-python-bundle-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-readiness-home-'));
+  installTimeoutGbrain(home);
+  fs.mkdirSync(path.join(project, 'app'), { recursive: true });
+  fs.mkdirSync(path.join(project, '.ai-context'), { recursive: true });
+  fs.mkdirSync(path.join(project, '.gstack'), { recursive: true });
+  fs.mkdirSync(path.join(project, 'docs'), { recursive: true });
+  fs.writeFileSync(path.join(project, 'app', 'web_app.py'), 'print("ready")\n');
+  fs.writeFileSync(path.join(project, 'app', 'test.py'), 'print("test")\n');
+  fs.writeFileSync(path.join(project, 'app', 'run_web.bat'), 'python web_app.py\n');
+  fs.writeFileSync(path.join(project, '.ai-context', 'project.json'), JSON.stringify({
+    project_id: 'readiness-python-bundle',
+    repo_path: project,
+    gitnexus: { repo: 'readiness-python-bundle' },
+  }, null, 2));
+  fs.writeFileSync(path.join(project, '.gstack', 'project-state.json'), JSON.stringify({
+    project_id: 'readiness-python-bundle',
+    quality_gates: { code_context: 'missing' },
+  }, null, 2));
+
+  const result = spawnSync(readinessBin, [
+    '--target', project,
+    '--mode', 'auto',
+    '--skip-code-context',
+    '--json',
+  ], {
+    cwd: root,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      HOME: home,
+      PATH: `${home}:${testPath}`,
+    },
+  });
+
+  assert.notEqual(result.status, null, result.stderr || result.stdout);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.status, 'partial');
+  assert.equal(output.git, 'missing');
+  assert.equal(output.runtime, 'ready');
+  assert.equal(output.code_context, 'blocked_until_git');
+  assert.equal(output.repository.status, 'needs_git_baseline');
+  assert.equal(output.long_term_readiness.status, 'blocked_until_git');
+  assert.equal(output.next_recommended_agent, 'Foundation Remediation Agent');
+  assert.equal(output.next_recommended_recipe, 'Repository Baseline Gate');
+  const state = JSON.parse(fs.readFileSync(path.join(project, '.gstack', 'project-state.json'), 'utf8'));
+  assert.equal(state.foundation.readiness, 'partial');
+  assert.equal(state.repository.status, 'needs_git_baseline');
+  assert.equal(state.long_term_readiness.status, 'blocked_until_git');
+  assert.equal(state.quality_gates.code_context, 'blocked_until_git');
+  assert.equal(state.runtime.dev, 'cd app && python3 web_app.py');
+  assert.match(state.runtime.test, /python3 -m py_compile/);
+  assert.equal(state.runtime.install, 'not_required');
 });

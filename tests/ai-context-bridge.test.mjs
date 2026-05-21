@@ -34,6 +34,26 @@ function tempGitProject() {
   return project;
 }
 
+function tempNonGitProject() {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-context-bridge-non-git-'));
+  fs.mkdirSync(path.join(project, '.ai-context'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.ai-context', 'project.json'), JSON.stringify({
+    project_id: 'bridge-non-git',
+    repo_path: project,
+    gitnexus: {
+      repo: 'bridge-non-git',
+      command: ['gitnexus'],
+      fallback_command: ['missing-gitnexus-fallback'],
+      prefer_local: true,
+      embeddings: false,
+      skip_agents_md: true,
+      no_stats: true,
+    },
+  }, null, 2));
+  fs.writeFileSync(path.join(project, 'README.md'), '# non git bundle\n');
+  return project;
+}
+
 function installFakeNvmGitNexus(home) {
   const bin = path.join(home, '.nvm', 'versions', 'node', 'v24.99.0', 'bin');
   fs.mkdirSync(bin, { recursive: true });
@@ -87,6 +107,40 @@ printf 'Changes detected without risk line\\n'
   fs.chmodSync(gitnexus, 0o755);
   return gitnexus;
 }
+
+test('baseline records structured fallback in non-git bundles', () => {
+  const project = tempNonGitProject();
+
+  const result = spawnSync(process.execPath, [bridge, 'baseline'], {
+    cwd: project,
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const baseline = JSON.parse(fs.readFileSync(path.join(project, '.ai-context', 'change-baseline.json'), 'utf8'));
+  assert.equal(baseline.repository_state.status, 'not_git_repo');
+  assert.equal(baseline.branch, 'not-a-git-repo');
+  assert.deepEqual(baseline.dirty_files, []);
+  assert.match(result.stdout, /not_git_repo/);
+});
+
+test('postchange writes structured fallback run in non-git bundles', () => {
+  const project = tempNonGitProject();
+
+  const result = spawnSync(process.execPath, [bridge, 'postchange', '--scope', 'all', '--run-id', 'non-git-fallback'], {
+    cwd: project,
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const run = JSON.parse(fs.readFileSync(path.join(project, '.ai-context', 'runs', 'non-git-fallback', 'run.json'), 'utf8'));
+  assert.equal(run.repository_state.status, 'not_git_repo');
+  assert.equal(run.risk, 'unknown');
+  assert.equal(run.commit_gate, 'blocked');
+  assert.equal(run.risk_source, 'non_git_fallback');
+  assert.equal(run.detect_changes_ok, false);
+  assert.match(fs.readFileSync(path.join(project, 'docs', 'CODE_CONTEXT_REPORT.md'), 'utf8'), /Status: missing/);
+});
 
 function installFakeGbrain(bin, pages = {}) {
   fs.mkdirSync(bin, { recursive: true });

@@ -94,8 +94,18 @@ fi
 DATE="$(date +%Y-%m-%d)"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 GENERATED_AT="$(date -Iseconds)"
+INSTALL_LOG="$TARGET_DIR/.gstack/install-log.txt"
+mkdir -p "$TARGET_DIR/.gstack"
+: > "$INSTALL_LOG"
 
 log() {
+  if [ "${GSTACK_HARNESS_VERBOSE:-0}" = "1" ]; then
+    printf '%s\n' "$*"
+  fi
+  printf '%s\n' "$*" >> "$INSTALL_LOG"
+}
+
+say() {
   printf '%s\n' "$*"
 }
 
@@ -379,6 +389,9 @@ has_runtime_manifest() {
     if [ -f "$dir/package.json" ] || [ -f "$dir/pyproject.toml" ] || [ -f "$dir/go.mod" ] || [ -f "$dir/Cargo.toml" ] || [ -f "$dir/Makefile" ]; then
       return 0
     fi
+    if [ -f "$dir/web_app.py" ] || [ -f "$dir/app.py" ] || [ -f "$dir/main.py" ] || [ -f "$dir/run_web.ps1" ] || [ -f "$dir/run_web.bat" ]; then
+      return 0
+    fi
   done
   return 1
 }
@@ -414,7 +427,7 @@ detect_runtime() {
     runtime_dir="$TARGET_DIR"
     [ -n "$candidate_rel" ] && runtime_dir="$TARGET_DIR/$candidate_rel"
     [ -d "$runtime_dir" ] || continue
-    if [ -f "$runtime_dir/package.json" ] || [ -f "$runtime_dir/pyproject.toml" ] || [ -f "$runtime_dir/go.mod" ] || [ -f "$runtime_dir/Cargo.toml" ] || [ -f "$runtime_dir/Makefile" ]; then
+    if [ -f "$runtime_dir/package.json" ] || [ -f "$runtime_dir/pyproject.toml" ] || [ -f "$runtime_dir/go.mod" ] || [ -f "$runtime_dir/Cargo.toml" ] || [ -f "$runtime_dir/Makefile" ] || [ -f "$runtime_dir/web_app.py" ] || [ -f "$runtime_dir/app.py" ] || [ -f "$runtime_dir/main.py" ] || [ -f "$runtime_dir/run_web.ps1" ] || [ -f "$runtime_dir/run_web.bat" ]; then
       runtime_rel="$candidate_rel"
       break
     fi
@@ -468,6 +481,15 @@ detect_runtime() {
   elif [ -f "$runtime_dir/Makefile" ]; then
     INSTALL_COMMAND="${prefix}make install"
     TEST_COMMAND="${prefix}make test"
+  elif [ -f "$runtime_dir/web_app.py" ] || [ -f "$runtime_dir/app.py" ] || [ -f "$runtime_dir/main.py" ]; then
+    local entry="web_app.py"
+    [ -f "$runtime_dir/app.py" ] && entry="app.py"
+    [ -f "$runtime_dir/main.py" ] && entry="main.py"
+    [ -f "$runtime_dir/web_app.py" ] && entry="web_app.py"
+    INSTALL_COMMAND="not_required"
+    DEV_COMMAND="${prefix}python3 $entry"
+    TEST_COMMAND="${prefix}python3 -m py_compile *.py modules/*/service.py apps/server/*.py"
+    LOCAL_URL="http://127.0.0.1:8787"
   fi
 
   if [ -n "$INSTALL_COMMAND$DEV_COMMAND$TEST_COMMAND$LINT_COMMAND$TYPECHECK_COMMAND" ]; then
@@ -494,6 +516,84 @@ if git -C "$TARGET_DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
   BRANCH="${BRANCH:-unknown}"
   GIT_REMOTE_URL="$(git -C "$TARGET_DIR" config --get remote.origin.url 2>/dev/null || true)"
 fi
+
+REPOSITORY_STATUS="ready"
+REPOSITORY_NEXT_ACTION="none"
+CODE_CONTEXT_GATE="missing"
+LONG_TERM_READINESS_STATUS="ready"
+LONG_TERM_BLOCKERS=()
+if [ "$EFFECTIVE_MODE" = "app" ] && [ "$GIT_STATUS" != "ready" ]; then
+  REPOSITORY_STATUS="needs_git_baseline"
+  REPOSITORY_NEXT_ACTION="initialize git baseline after user confirmation"
+  CODE_CONTEXT_GATE="blocked_until_git"
+  LONG_TERM_READINESS_STATUS="blocked_until_git"
+  LONG_TERM_BLOCKERS=("needs_git_baseline")
+fi
+
+PROJECT_SIZE_BYTES="$(du -sb "$TARGET_DIR" 2>/dev/null | awk '{print $1}' || printf '0')"
+SENSITIVE_PATHS_JSON="$(
+  TARGET_DIR="$TARGET_DIR" node <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const root = process.env.TARGET_DIR;
+const findings = [];
+const sensitiveName = /(^|[._-])(token|secret|password|passwd|apikey|api-key|credential|credentials)([._-]|$)/i;
+function add(file, reason) {
+  findings.push({ path: file.split(path.sep).join('/'), reason });
+}
+function walk(dir, rel = '') {
+  let entries = [];
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  for (const entry of entries) {
+    const childRel = rel ? path.join(rel, entry.name) : entry.name;
+    const child = path.join(dir, entry.name);
+    const normalized = childRel.split(path.sep).join('/');
+    if (normalized.startsWith('.git/') || normalized.startsWith('.gstack/') || normalized.startsWith('.ai-context/')) continue;
+    if (entry.isDirectory()) {
+      if (normalized === 'server_materials/10-access' || normalized.endsWith('/10-access')) add(normalized, 'server access directory');
+      walk(child, childRel);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    if (/\.(pem|key|p12|pfx)$/i.test(entry.name)) add(normalized, 'private key material');
+    else if (entry.name === '.env' || entry.name.startsWith('.env.')) add(normalized, 'environment secret file');
+    else if (entry.name.toLowerCase() === 'mima.txt') add(normalized, 'password file name');
+    else if (sensitiveName.test(entry.name)) add(normalized, 'sensitive file name');
+  }
+}
+walk(root);
+process.stdout.write(JSON.stringify(findings));
+NODE
+)"
+SENSITIVE_CANDIDATES_JSON="$(printf '%s' "$SENSITIVE_PATHS_JSON" | node -e 'const fs=require("fs"); const items=JSON.parse(fs.readFileSync(0,"utf8")||"[]"); process.stdout.write(JSON.stringify(items.map((item)=>item.path).filter(Boolean)));')"
+INSTALL_PREFLIGHT_JSON="$(cat <<EOF
+{
+  "schema": "gstack-harness.install_preflight.v1",
+  "generated_at": "$(json_escape "$GENERATED_AT")",
+  "target": "$(json_escape "$TARGET_DIR")",
+  "project": {
+    "id": "$(json_escape "$PROJECT_ID")",
+    "size_bytes": ${PROJECT_SIZE_BYTES:-0}
+  },
+  "git": {
+    "status": "$GIT_STATUS",
+    "branch": "$(json_escape "$BRANCH")",
+    "remote_url": "$(json_escape "$GIT_REMOTE_URL")"
+  },
+  "sensitive_paths": $SENSITIVE_PATHS_JSON,
+  "planned_writes": [
+    "PROJECT_STATE.md",
+    "CLAUDE.md",
+    ".gstack/project-state.json",
+    ".gstack/harness/**",
+    ".ai-context/project.json",
+    "docs/FOUNDATION_READINESS_REPORT.md",
+    "docs/CODEX_START_PROMPT.md"
+  ]
+}
+EOF
+)"
+write_file ".gstack/install-preflight.json" "$INSTALL_PREFLIGHT_JSON"
 
 GBRAIN_STATUS="unavailable"
 GBRAIN_PAGES="0"
@@ -546,6 +646,25 @@ if GSTACK_ROOT="$(detect_gstack_root 2>/dev/null)"; then
 fi
 
 detect_runtime "$EFFECTIVE_MODE"
+
+BUSINESS_CONTEXT_TYPE="unknown"
+BUSINESS_CONTEXT_ENTRYPOINT=""
+BUSINESS_CONTEXT_MODULES=""
+BUSINESS_CONTEXT_DEPLOY=""
+BUSINESS_CONTEXT_SECURITY=""
+if [ -f "$TARGET_DIR/app/web_app.py" ] || [ -f "$TARGET_DIR/web_app.py" ]; then
+  BUSINESS_CONTEXT_TYPE="Python app"
+  if [ -f "$TARGET_DIR/app/web_app.py" ]; then
+    BUSINESS_CONTEXT_ENTRYPOINT="app/web_app.py"
+  else
+    BUSINESS_CONTEXT_ENTRYPOINT="web_app.py"
+  fi
+  [ -d "$TARGET_DIR/app/modules" ] && BUSINESS_CONTEXT_MODULES="app/modules"
+  [ -d "$TARGET_DIR/deploy" ] && BUSINESS_CONTEXT_DEPLOY="deploy/"
+fi
+if [ -d "$TARGET_DIR/server_materials/10-access" ] || [ -f "$TARGET_DIR/app/mima.txt" ]; then
+  BUSINESS_CONTEXT_SECURITY="sensitive server access or password files detected"
+fi
 
 PROJECT_PROTOCOL_STATUS="ready"
 FOUNDATION_VERDICT="ready"
@@ -830,6 +949,7 @@ copy_file "bin/gstack-harness-agent-status" ".gstack/harness/bin/gstack-harness-
 copy_file "bin/gstack-harness-schedule" ".gstack/harness/bin/gstack-harness-schedule"
 copy_file "bin/gstack-harness-workspace-hygiene" ".gstack/harness/bin/gstack-harness-workspace-hygiene"
 copy_file "bin/gstack-harness-atomic-commit" ".gstack/harness/bin/gstack-harness-atomic-commit"
+copy_file "bin/gstack-harness-repository-baseline" ".gstack/harness/bin/gstack-harness-repository-baseline"
 copy_file "scripts/ai-context-bridge.mjs" ".gstack/harness/scripts/ai-context-bridge.mjs"
 copy_file "scripts/gstack-scheduler.mjs" ".gstack/harness/scripts/gstack-scheduler.mjs"
 copy_file "docs/SCHEDULER_MODEL.md" ".gstack/harness/docs/SCHEDULER_MODEL.md"
@@ -838,7 +958,7 @@ copy_file "scripts/gstack-scheduler.mjs" "scripts/gstack-scheduler.mjs"
 copy_file "docs/SCHEDULER_MODEL.md" "docs/SCHEDULER_MODEL.md"
 
 if [ "$DRY_RUN" -ne 1 ]; then
-  chmod +x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-init" "$TARGET_DIR/.gstack/harness/bin/pggg" "$TARGET_DIR/.gstack/harness/bin/pcm-harness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-record-run" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-usage-report" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-enable-report-timer" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-schedule" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-workspace-hygiene" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-atomic-commit" "$TARGET_DIR/scripts/ai-context-bridge.mjs" "$TARGET_DIR/scripts/gstack-scheduler.mjs" 2>/dev/null || true
+  chmod +x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-init" "$TARGET_DIR/.gstack/harness/bin/pggg" "$TARGET_DIR/.gstack/harness/bin/pcm-harness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-record-run" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-usage-report" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-enable-report-timer" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-schedule" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-workspace-hygiene" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-atomic-commit" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-repository-baseline" "$TARGET_DIR/scripts/ai-context-bridge.mjs" "$TARGET_DIR/scripts/gstack-scheduler.mjs" 2>/dev/null || true
 fi
 
 AGENT_TEAM_CONTENT="$(cat <<EOF
@@ -1145,12 +1265,19 @@ NEXT_RECIPE="R0 Restore / Resume Context"
 if [ "$FOUNDATION_VERDICT" != "ready" ]; then
   NEXT_AGENT="Foundation Remediation Agent"
   NEXT_RECIPE="R-0.5 Foundation Remediation"
+elif [ "$REPOSITORY_STATUS" = "needs_git_baseline" ]; then
+  NEXT_AGENT="Foundation Remediation Agent"
+  NEXT_RECIPE="Repository Baseline Gate"
 elif [ "$PROBLEM_HANDLING_REQUIRED" -eq 1 ]; then
   NEXT_AGENT="Problem Handling Agent"
   NEXT_RECIPE="Problem Handling preflight, then R0 Restore / Resume Context"
 elif [ -n "$EXISTING_PHASE" ]; then
   [ -n "$EXISTING_NEXT_AGENT" ] && NEXT_AGENT="$EXISTING_NEXT_AGENT"
   [ -n "$EXISTING_NEXT_RECIPE" ] && NEXT_RECIPE="$EXISTING_NEXT_RECIPE"
+fi
+if [ "$REPOSITORY_STATUS" = "needs_git_baseline" ]; then
+  NEXT_AGENT="Foundation Remediation Agent"
+  NEXT_RECIPE="Repository Baseline Gate"
 fi
 
 PROBLEM_HANDLING_STATUS_TEXT="not_needed"
@@ -1191,6 +1318,15 @@ PROJECT_STATE_CONTENT="$(cat <<EOF
 - Runners: $BROWSE_STATUS
 - Memory policy: ready
 
+## Repository Baseline
+
+- Repository: $REPOSITORY_STATUS
+- Git state: $GIT_STATUS
+- Branch: $BRANCH
+- Code Context: $CODE_CONTEXT_GATE
+- Long-term readiness: $LONG_TERM_READINESS_STATUS
+- Next action: $REPOSITORY_NEXT_ACTION
+
 ## Runtime
 
 - Install command: ${INSTALL_COMMAND:-}
@@ -1201,10 +1337,26 @@ PROJECT_STATE_CONTENT="$(cat <<EOF
 - Local URL: ${LOCAL_URL:-}
 - Production URL: ${PRODUCTION_URL:-}
 
+## Business Context
+
+- Type: $BUSINESS_CONTEXT_TYPE
+- Entrypoint: ${BUSINESS_CONTEXT_ENTRYPOINT:-unknown}
+- Modules: ${BUSINESS_CONTEXT_MODULES:-unknown}
+- Deploy materials: ${BUSINESS_CONTEXT_DEPLOY:-unknown}
+- Sensitive boundaries: ${BUSINESS_CONTEXT_SECURITY:-none detected}
+- First verification: ${TEST_COMMAND:-unknown}
+
+## File Ownership
+
+- Editable: PROJECT_STATE.md, CLAUDE.md managed block
+- Harness-managed: .gstack/harness/**, .gstack/project-state.json, .ai-context/project.json, docs/FOUNDATION_READINESS_REPORT.md, docs/CODEX_START_PROMPT.md
+- Runtime-generated: .gstack/usage-runs/**, .ai-context/runs/**, docs/agents/**
+- Do-not-commit candidates: sensitive paths from .gstack/install-preflight.json
+
 ## Quality Gates
 
 - Foundation Readiness: $FOUNDATION_VERDICT
-- Code Context: missing
+- Code Context: $CODE_CONTEXT_GATE
 - Health: $EXISTING_HEALTH_GATE
 - Browser QA: $EXISTING_BROWSER_QA_GATE
 - Windows QA: $EXISTING_WINDOWS_QA_GATE
@@ -1611,6 +1763,17 @@ PROJECT_STATE_JSON="$(cat <<EOF
     "memory_policy": "ready",
     "problem_handling_required": $([ "$PROBLEM_HANDLING_REQUIRED" -eq 1 ] && printf 'true' || printf 'false')
   },
+  "repository": {
+    "status": "$(json_escape "$REPOSITORY_STATUS")",
+    "git": "$(json_escape "$GIT_STATUS")",
+    "branch": "$(json_escape "$BRANCH")",
+    "baseline_required": $([ "$REPOSITORY_STATUS" = "needs_git_baseline" ] && printf 'true' || printf 'false'),
+    "next_action": "$(json_escape "$REPOSITORY_NEXT_ACTION")"
+  },
+  "long_term_readiness": {
+    "status": "$(json_escape "$LONG_TERM_READINESS_STATUS")",
+    "blockers": $(json_array "${LONG_TERM_BLOCKERS[@]}")
+  },
   "agents": {
     "team": ".gstack/harness/agents/TEAM.md",
     "required_core": [
@@ -1647,9 +1810,27 @@ PROJECT_STATE_JSON="$(cat <<EOF
     "local_url": "$(json_escape "${LOCAL_URL:-}")",
     "production_url": "$(json_escape "${PRODUCTION_URL:-}")"
   },
+  "business_context": {
+    "type": "$(json_escape "$BUSINESS_CONTEXT_TYPE")",
+    "entrypoint": "$(json_escape "${BUSINESS_CONTEXT_ENTRYPOINT:-unknown}")",
+    "modules": "$(json_escape "${BUSINESS_CONTEXT_MODULES:-unknown}")",
+    "deploy_materials": "$(json_escape "${BUSINESS_CONTEXT_DEPLOY:-unknown}")",
+    "sensitive_boundaries": "$(json_escape "${BUSINESS_CONTEXT_SECURITY:-none detected}")",
+    "first_verification": "$(json_escape "${TEST_COMMAND:-unknown}")"
+  },
+  "install": {
+    "preflight": ".gstack/install-preflight.json",
+    "log": ".gstack/install-log.txt"
+  },
+  "file_ownership": {
+    "editable": ["PROJECT_STATE.md", "CLAUDE.md managed block"],
+    "harness_managed": [".gstack/harness/**", ".gstack/project-state.json", ".ai-context/project.json", "docs/FOUNDATION_READINESS_REPORT.md", "docs/CODEX_START_PROMPT.md"],
+    "runtime_generated": [".gstack/usage-runs/**", ".ai-context/runs/**", "docs/agents/**"],
+    "do_not_commit_candidates": $SENSITIVE_CANDIDATES_JSON
+  },
   "quality_gates": {
     "foundation_readiness": "$FOUNDATION_VERDICT",
-    "code_context": "missing",
+    "code_context": "$CODE_CONTEXT_GATE",
     "health": "$(json_escape "$EXISTING_HEALTH_GATE")",
     "browser_qa": "$(json_escape "$EXISTING_BROWSER_QA_GATE")",
     "windows_qa": "$(json_escape "$EXISTING_WINDOWS_QA_GATE")",
@@ -1687,6 +1868,9 @@ PROJECT_STATE_JSON="$(cat <<EOF
     "workspace_hygiene_json": ".gstack/workspace-hygiene.json",
     "workspace_hygiene_baseline": ".gstack/workspace-hygiene-baseline.json",
     "workspace_hygiene_runner": ".gstack/harness/bin/gstack-harness-workspace-hygiene",
+    "repository_baseline_report": "docs/REPOSITORY_BASELINE_REPORT.md",
+    "repository_baseline_json": ".gstack/repository-baseline.json",
+    "repository_baseline_runner": ".gstack/harness/bin/gstack-harness-repository-baseline",
     "usage_report_timer": ".gstack/harness/bin/gstack-harness-enable-report-timer"
   },
   "workspace_hygiene": {
@@ -1745,6 +1929,18 @@ if [ -f "$TARGET_DIR/.gstack/project-state.json" ] && command -v node >/dev/null
 const fs = require('fs');
 const existingPath = process.argv[2];
 const generated = JSON.parse(process.env.GENERATED_STATE_JSON);
+if (generated.repository?.status === 'needs_git_baseline') {
+  generated.quality_gates = {
+    ...(generated.quality_gates || {}),
+    code_context: 'blocked_until_git',
+  };
+  generated.long_term_readiness = {
+    status: 'blocked_until_git',
+    blockers: ['needs_git_baseline'],
+  };
+  generated.next_recommended_agent = 'Foundation Remediation Agent';
+  generated.next_recommended_recipe = 'Repository Baseline Gate';
+}
 const markdownEvidence = JSON.parse(process.env.EXISTING_MARKDOWN_EVIDENCE_JSON || '{}');
 let existing = {};
 try {
@@ -1819,6 +2015,19 @@ next.repeat_work = {
   ...(generated.repeat_work || {}),
   ...(enrichedExisting.repeat_work || {}),
 };
+try {
+  const preflightPath = `${process.argv[2].replace(/\/\.gstack\/project-state\.json$/, '')}/.gstack/install-preflight.json`;
+  const preflight = JSON.parse(fs.readFileSync(preflightPath, 'utf8'));
+  next.file_ownership = {
+    ...(generated.file_ownership || {}),
+    ...(enrichedExisting.file_ownership || {}),
+    do_not_commit_candidates: Array.from(new Set([
+      ...((generated.file_ownership || {}).do_not_commit_candidates || []),
+      ...((enrichedExisting.file_ownership || {}).do_not_commit_candidates || []),
+      ...(preflight.sensitive_paths || []).map((item) => item.path).filter(Boolean),
+    ])),
+  };
+} catch {}
 next.phase = enrichedExisting.phase || generated.phase;
 next.goal = enrichedExisting.goal || generated.goal;
 next.last_completed_agent = enrichedExisting.last_completed_agent || generated.last_completed_agent;
@@ -1852,6 +2061,8 @@ Verdict: $FOUNDATION_VERDICT
 | agent team | ready | .gstack/harness/agents/TEAM.md |
 | problem handling | $([ "$PROBLEM_HANDLING_REQUIRED" -eq 1 ] && printf 'required' || printf 'not_needed') | .gstack/harness/agents/problem-handling.md |
 | git state | $GIT_STATUS | branch: $BRANCH |
+| repository baseline | $REPOSITORY_STATUS | $REPOSITORY_NEXT_ACTION |
+| long-term readiness | $LONG_TERM_READINESS_STATUS | blockers: ${LONG_TERM_BLOCKERS[*]:-none} |
 | runtime | $RUNTIME_STATUS | mode: $EFFECTIVE_MODE |
 
 ## Blockers
@@ -1878,7 +2089,7 @@ EOF
 
 write_file "docs/FOUNDATION_READINESS_REPORT.md" "$READINESS_REPORT"
 
-if [ "$DRY_RUN" -ne 1 ] && [ "$GBRAIN_STATUS" = "ready" ] && [ -f "$TARGET_DIR/scripts/ai-context-bridge.mjs" ] && [ -f "$TARGET_DIR/.ai-context/project.json" ]; then
+if [ "$DRY_RUN" -ne 1 ] && [ "$GBRAIN_STATUS" = "ready" ] && [ "$REPOSITORY_STATUS" != "needs_git_baseline" ] && [ -f "$TARGET_DIR/scripts/ai-context-bridge.mjs" ] && [ -f "$TARGET_DIR/.ai-context/project.json" ]; then
   if (cd "$TARGET_DIR" && timeout 90s node scripts/ai-context-bridge.mjs sync-gbrain --page overview --page state --page foundation_readiness --page code_context --page quality_gates --page handoff > "$TARGET_DIR/.gstack/sync-gbrain-last.json" 2> "$TARGET_DIR/.gstack/sync-gbrain-last.err"); then
     :
   else
@@ -1889,13 +2100,15 @@ fi
 if [ "$DRY_RUN" -ne 1 ] && [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" ]; then
   timeout 45s "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" --target "$TARGET_DIR" --mode "$EFFECTIVE_MODE" > "$TARGET_DIR/.gstack/readiness-last.json" || true
   INITIAL_READINESS="$(node -e 'const fs=require("fs"); try { const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(s.foundation?.readiness || "unknown"); } catch { process.stdout.write("unknown"); }' "$TARGET_DIR/.gstack/project-state.json" 2>/dev/null || printf 'unknown')"
-  if [ "$INITIAL_READINESS" != "ready" ] && [ "$EFFECTIVE_MODE" != "docs-only" ] && [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" ]; then
+  if [ "$INITIAL_READINESS" != "ready" ] && [ "$EFFECTIVE_MODE" != "docs-only" ] && [ "$REPOSITORY_STATUS" != "needs_git_baseline" ] && [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" ]; then
     if ! timeout 90s "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" --target "$TARGET_DIR" > "$TARGET_DIR/.gstack/remediation-last.out"; then
       printf 'Foundation remediation command exited non-zero or timed out. Initial readiness: %s\n' "$INITIAL_READINESS" >> "$TARGET_DIR/.gstack/remediation-last.out"
     fi
     timeout 45s "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" --target "$TARGET_DIR" --mode "$EFFECTIVE_MODE" > "$TARGET_DIR/.gstack/readiness-last.json" || true
   elif [ "$INITIAL_READINESS" != "ready" ] && [ "$EFFECTIVE_MODE" = "docs-only" ]; then
     :
+  elif [ "$INITIAL_READINESS" != "ready" ] && [ "$REPOSITORY_STATUS" = "needs_git_baseline" ]; then
+    printf 'Foundation remediation not run: repository baseline requires user-confirmed git initialization.\n' > "$TARGET_DIR/.gstack/remediation-last.out"
   else
     printf 'Foundation remediation not run: readiness is ready.\n' > "$TARGET_DIR/.gstack/remediation-last.out"
   fi
@@ -1903,7 +2116,7 @@ if [ "$DRY_RUN" -ne 1 ] && [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-
     "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" --target "$TARGET_DIR" --event harness_init >/dev/null 2>&1 || true
   fi
   if command -v node >/dev/null 2>&1; then
-    FINAL_STATE_INFO="$(node -e 'const fs=require("fs"); const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const vals=[s.foundation?.readiness||"",s.foundation?.gbrain||"",s.foundation?.gbrain_query||"",s.foundation?.runtime||"",s.next_recommended_agent||"",s.next_recommended_recipe||"",s.quality_gates?.code_context||""]; console.log(vals.map(v=>String(v).replace(/[\t\n\r]/g," ")).join("\t"));' "$TARGET_DIR/.gstack/project-state.json" 2>/dev/null || true)"
+    FINAL_STATE_INFO="$(node -e 'const fs=require("fs"); const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if (s.repository?.status === "needs_git_baseline") { s.quality_gates = {...(s.quality_gates || {}), code_context: "blocked_until_git"}; s.long_term_readiness = {status: "blocked_until_git", blockers: ["needs_git_baseline"]}; s.next_recommended_agent = "Foundation Remediation Agent"; s.next_recommended_recipe = "Repository Baseline Gate"; fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n"); } const vals=[s.foundation?.readiness||"",s.foundation?.gbrain||"",s.foundation?.gbrain_query||"",s.foundation?.runtime||"",s.next_recommended_agent||"",s.next_recommended_recipe||"",s.quality_gates?.code_context||""]; console.log(vals.map(v=>String(v).replace(/[\t\n\r]/g," ")).join("\t"));' "$TARGET_DIR/.gstack/project-state.json" 2>/dev/null || true)"
     IFS=$'\t' read -r FOUNDATION_VERDICT GBRAIN_STATUS GBRAIN_QUERY_STATUS RUNTIME_STATUS NEXT_AGENT NEXT_RECIPE CODE_CONTEXT_STATUS_FINAL <<< "$FINAL_STATE_INFO"
     FOUNDATION_VERDICT="${FOUNDATION_VERDICT:-ready}"
     GBRAIN_STATUS="${GBRAIN_STATUS:-unknown}"
@@ -1911,7 +2124,37 @@ if [ "$DRY_RUN" -ne 1 ] && [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-
     RUNTIME_STATUS="${RUNTIME_STATUS:-unknown}"
     NEXT_AGENT="${NEXT_AGENT:-Orchestrator}"
     NEXT_RECIPE="${NEXT_RECIPE:-R0 Restore / Resume Context}"
-    if [ "$GBRAIN_STATUS" = "ready" ] && [ -f "$TARGET_DIR/scripts/ai-context-bridge.mjs" ] && [ -f "$TARGET_DIR/.ai-context/project.json" ]; then
+    if [ "$REPOSITORY_STATUS" = "needs_git_baseline" ]; then
+      CODE_CONTEXT_STATUS_FINAL="blocked_until_git"
+      NEXT_AGENT="Foundation Remediation Agent"
+      NEXT_RECIPE="Repository Baseline Gate"
+      TARGET_DIR="$TARGET_DIR" node <<'NODE' >/dev/null 2>&1 || true
+const fs = require('fs');
+const path = require('path');
+const statePath = path.join(process.env.TARGET_DIR, '.gstack/project-state.json');
+const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+state.repository = {
+  ...(state.repository || {}),
+  status: 'needs_git_baseline',
+  git: 'missing',
+  branch: 'none',
+  baseline_required: true,
+  next_action: 'initialize git baseline after user confirmation',
+};
+state.long_term_readiness = {
+  status: 'blocked_until_git',
+  blockers: ['needs_git_baseline'],
+};
+state.quality_gates = {
+  ...(state.quality_gates || {}),
+  code_context: 'blocked_until_git',
+};
+state.next_recommended_agent = 'Foundation Remediation Agent';
+state.next_recommended_recipe = 'Repository Baseline Gate';
+fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+NODE
+    fi
+    if [ "$GBRAIN_STATUS" = "ready" ] && [ "$REPOSITORY_STATUS" != "needs_git_baseline" ] && [ -f "$TARGET_DIR/scripts/ai-context-bridge.mjs" ] && [ -f "$TARGET_DIR/.ai-context/project.json" ]; then
       (cd "$TARGET_DIR" && timeout 90s node scripts/ai-context-bridge.mjs sync-gbrain --page overview --page state --page foundation_readiness --page code_context --page quality_gates --page handoff > "$TARGET_DIR/.gstack/sync-gbrain-last.json" 2> "$TARGET_DIR/.gstack/sync-gbrain-last.err") || true
     fi
   fi
@@ -1919,6 +2162,22 @@ fi
 
 if [ "$DRY_RUN" -ne 1 ] && [ "$EFFECTIVE_MODE" = "docs-only" ] && [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" ]; then
   "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" --target "$TARGET_DIR" --event harness_init >/dev/null 2>&1 || true
+fi
+
+if [ "$GIT_STATUS" = "ready" ]; then
+  CODEX_SESSION_STEPS="$(cat <<'EOF'
+15. 本轮开始时先跑 node scripts/ai-context-bridge.mjs baseline，把接管时已有 dirty worktree 记录成 baseline；再用 .gstack/harness/bin/gstack-harness-record-run --event session_start --status in_progress 记录快照。
+16. 本轮结束时跑 node scripts/ai-context-bridge.mjs postchange --scope all 生成 session delta 报告；whole-worktree GitNexus risk 只作为 raw evidence，baseline 前已有脏文件只作为 warning。
+17. 提交前只 stage 本轮 owned files，然后跑 node scripts/ai-context-bridge.mjs postchange --scope staged；staged report 才是 commit gate。
+EOF
+)"
+else
+  CODEX_SESSION_STEPS="$(cat <<'EOF'
+15. 非 git 项目：长期多 agent 接管被 Repository Baseline Gate 阻塞；不要开始业务实现、review、ship 或 release。
+16. 只允许做 README 扫描、安全 preflight、runtime detection、workspace hygiene baseline，以及向用户建议先建立 git baseline。
+17. 先建立 git baseline：先运行 .gstack/harness/bin/gstack-harness-repository-baseline --target . --json 预检；经用户确认后再运行 .gstack/harness/bin/gstack-harness-repository-baseline --target . --yes --json 初始化 git、提交干净初始快照并刷新 baseline。完成前 GitNexus impact/detect-changes、postchange gate、commit automation、review/ship/release 都不可作为真实门禁。
+EOF
+)"
 fi
 
 CODEX_START_PROMPT="$(cat <<EOF
@@ -1947,9 +2206,7 @@ CODEX_START_PROMPT="$(cat <<EOF
 12. Foundation Readiness 如果是 unknown/stale，先跑 .gstack/harness/bin/gstack-harness-readiness --target "$TARGET_DIR"。如果是 partial/blocked，先跑 .gstack/harness/bin/gstack-harness-remediate --target "$TARGET_DIR"，再回到 readiness 复检。
 13. 先输出当前 phase、Foundation Readiness、blockers/warnings、推荐 recipe、推荐 agent、是否需要刷新 memory/code context，以及简短原因。
 14. 判断用户当前话语时，先结合同一个 session 内最近 1-2 次 Codex 输出，区分确认、纠正、补充需求、改变方向、指出缺失上下文或升级信号；需要长期沉淀时只记录摘要和 inferred delta，不保存完整 transcript。
-15. 本轮开始时先跑 node scripts/ai-context-bridge.mjs baseline，把接管时已有 dirty worktree 记录成 baseline；再用 .gstack/harness/bin/gstack-harness-record-run --event session_start --status in_progress 记录快照。
-16. 本轮结束时跑 node scripts/ai-context-bridge.mjs postchange --scope all 生成 session delta 报告；whole-worktree GitNexus risk 只作为 raw evidence，baseline 前已有脏文件只作为 warning。
-17. 提交前只 stage 本轮 owned files，然后跑 node scripts/ai-context-bridge.mjs postchange --scope staged；staged report 才是 commit gate。
+$CODEX_SESSION_STEPS
 18. 完成状态更新后必须用 .gstack/harness/bin/gstack-harness-record-run --event session_end --status completed 记录 usage run；如有卡点、用户纠正、能力缺口、warning 或 blocker，把对应参数带上。
 19. 除非我明确要求，不要开始业务代码修改。
 
@@ -2093,6 +2350,14 @@ SUMMARY_JSON="$(cat <<EOF
   "gstack": "$GSTACK_STATUS",
   "gstack_root": "$(json_escape "${GSTACK_ROOT:-}")",
   "git": "$GIT_STATUS",
+  "repository": {
+    "status": "$(json_escape "$REPOSITORY_STATUS")",
+    "next_action": "$(json_escape "$REPOSITORY_NEXT_ACTION")"
+  },
+  "long_term_readiness": {
+    "status": "$(json_escape "$LONG_TERM_READINESS_STATUS")",
+    "blockers": $(json_array "${LONG_TERM_BLOCKERS[@]}")
+  },
   "runtime": "$RUNTIME_STATUS",
   "readiness_report": "docs/FOUNDATION_READINESS_REPORT.md",
   "readiness_runner": ".gstack/harness/bin/gstack-harness-readiness",
@@ -2130,7 +2395,7 @@ SUMMARY_JSON="$(cat <<EOF
     ]
   },
   "code_context": {
-    "status": "${CODE_CONTEXT_STATUS_FINAL:-missing}",
+    "status": "${CODE_CONTEXT_STATUS_FINAL:-$CODE_CONTEXT_GATE}",
     "provider": "gitnexus",
     "config": ".ai-context/project.json",
     "status_file": ".ai-context/gitnexus-status.json",
@@ -2157,6 +2422,21 @@ EOF
 )"
 
 log "$SUMMARY_JSON"
+if [ "$DRY_RUN" -ne 1 ]; then
+  write_file ".gstack/install-summary.json" "$SUMMARY_JSON"
+fi
+say "Install summary"
+say "- Status: $FOUNDATION_VERDICT"
+say "- Project: $PROJECT_ID"
+say "- Mode: $EFFECTIVE_MODE"
+say "- Git: $GIT_STATUS"
+say "- Runtime: $RUNTIME_STATUS"
+say "- Next: $NEXT_AGENT"
+say "- Preflight: .gstack/install-preflight.json"
+say "- Details: .gstack/install-log.txt"
+if [ "$DRY_RUN" -eq 1 ]; then
+  say "DRY_RUN summary only; detailed planned writes are in .gstack/install-log.txt"
+fi
 
 if [ "$START_CODEX" -eq 1 ]; then
   if [ "$DRY_RUN" -eq 1 ]; then

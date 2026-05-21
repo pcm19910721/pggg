@@ -255,6 +255,7 @@ test_fresh_install() {
     ".gstack/harness/bin/gstack-harness-schedule"
     ".gstack/harness/bin/gstack-harness-workspace-hygiene"
     ".gstack/harness/bin/gstack-harness-atomic-commit"
+    ".gstack/harness/bin/gstack-harness-repository-baseline"
     ".ai-context/project.json"
     ".ai-context/FIELD_CONTRACT.md"
     ".ai-context/gitnexus-status.json"
@@ -313,12 +314,15 @@ test_fresh_install() {
   assert_json_field "$TMP_ROOT/scheduler-agent.out" "state.agentId === 'build' && state.domain === 'integration'" "scheduler agent registration failed"
   (cd "$INSTALL_DIR" && .gstack/harness/bin/gstack-harness-schedule schedule --target . --task-id test-build --type coding --priority high --description "Implement scheduler self-test with verification evidence" > "$TMP_ROOT/scheduler-task.out")
   assert_json_field "$TMP_ROOT/scheduler-task.out" "state.status === 'assigned' && state.primaryAgent.agentId === 'build'" "scheduler task assignment failed"
-  assert_contains "$INSTALL_DIR/init.out" '"code_context_agent": "code-context"'
-  assert_contains "$INSTALL_DIR/init.out" '"code_context_report": "docs/CODE_CONTEXT_REPORT.md"'
-  assert_contains "$INSTALL_DIR/init.out" '"codebase_map_report": "docs/CODEBASE_MAP_REPORT.md"'
-  assert_contains "$INSTALL_DIR/init.out" '"code_context"'
-  assert_contains "$INSTALL_DIR/init.out" '"provider": "gitnexus"'
-  assert_contains "$INSTALL_DIR/init.out" '"config": ".ai-context/project.json"'
+  assert_contains "$INSTALL_DIR/init.out" "Install summary"
+  assert_contains "$INSTALL_DIR/init.out" "- Status: ready"
+  assert_contains "$INSTALL_DIR/init.out" "- Details: .gstack/install-log.txt"
+  assert_contains "$INSTALL_DIR/.gstack/install-summary.json" '"code_context_agent": "code-context"'
+  assert_contains "$INSTALL_DIR/.gstack/install-summary.json" '"code_context_report": "docs/CODE_CONTEXT_REPORT.md"'
+  assert_contains "$INSTALL_DIR/.gstack/install-summary.json" '"codebase_map_report": "docs/CODEBASE_MAP_REPORT.md"'
+  assert_contains "$INSTALL_DIR/.gstack/install-summary.json" '"code_context"'
+  assert_contains "$INSTALL_DIR/.gstack/install-summary.json" '"provider": "gitnexus"'
+  assert_contains "$INSTALL_DIR/.gstack/install-summary.json" '"config": ".ai-context/project.json"'
   assert_contains "$INSTALL_DIR/.gstack/usage-runs/index.jsonl" "harness_init"
   (cd "$INSTALL_DIR" && PATH="$FAKE_BIN:$PATH" .gstack/harness/bin/pggg --dry-run --no-start-codex > "$TMP_ROOT/pggg-local.out")
   assert_contains "$TMP_ROOT/pggg-local.out" "DRY_RUN"
@@ -344,7 +348,7 @@ test_fresh_install() {
   assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.artifacts.usage_runs === '.gstack/usage-runs'" "missing usage runs artifact link"
   assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.artifacts.foundation_readiness_runner === '.gstack/harness/bin/gstack-harness-readiness'" "missing readiness runner artifact link"
   assert_json_field "$INSTALL_DIR/.gstack/project-state.json" "state.usage && state.usage.latest_event === 'harness_init'" "missing latest usage run state"
-  assert_contains "$INSTALL_DIR/init.out" '"status": "ready"'
+  assert_contains "$INSTALL_DIR/.gstack/install-summary.json" '"status": "ready"'
 
   local usage_count
   usage_count="$(find "$INSTALL_DIR/.gstack/usage-runs" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')"
@@ -423,7 +427,8 @@ EOF
   local seed_content_dir="$TMP_ROOT/seeded-gbrain-content"
   mkdir -p "$seed_dir" "$seed_content_dir"
   GSTACK_HARNESS_REGISTRY="$TMP_ROOT/projects.jsonl" GBRAIN_STORE_PATH="$seed_store" GBRAIN_CONTENT_DIR="$seed_content_dir" PATH="$FAKE_BIN:$PATH" "$INIT" --target "$seed_dir" --project-id seeded --mode docs-only --no-start-codex > "$seed_dir/init.out"
-  assert_contains "$seed_dir/init.out" '"status": "ready"'
+  assert_contains "$seed_dir/init.out" "Install summary"
+  assert_contains "$seed_dir/.gstack/install-summary.json" '"status": "ready"'
   assert_contains "$seed_content_dir/project__seeded__overview.md" "project_uid:"
   assert_contains "$seed_content_dir/project__seeded__overview.md" "repo_path: \"$seed_dir\""
   assert_contains "$seed_content_dir/project__seeded__state.md" "Project State: seeded"
@@ -881,6 +886,7 @@ main() {
   bash -n "$SCRIPT_DIR/gstack-harness-schedule"
   bash -n "$SCRIPT_DIR/gstack-harness-workspace-hygiene"
   bash -n "$SCRIPT_DIR/gstack-harness-atomic-commit"
+  bash -n "$SCRIPT_DIR/gstack-harness-repository-baseline"
   node --check "$TEMPLATE_ROOT/scripts/ai-context-bridge.mjs" >/dev/null
   node --check "$TEMPLATE_ROOT/scripts/gstack-scheduler.mjs" >/dev/null
   pass "init script syntax"
