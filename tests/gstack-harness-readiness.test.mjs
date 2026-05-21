@@ -69,6 +69,65 @@ process.exit(0);
   fs.chmodSync(gbrain, 0o755);
 }
 
+function installFakeGh(bin, authExitCode = 0) {
+  fs.mkdirSync(bin, { recursive: true });
+  const gh = path.join(bin, 'gh');
+  fs.writeFileSync(gh, `#!/usr/bin/env bash
+if [ "$1" = "--version" ]; then
+  echo "gh version 2.0.0"
+  exit 0
+fi
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  exit ${authExitCode}
+fi
+exit 0
+`);
+  fs.chmodSync(gh, 0o755);
+}
+
+test('readiness records GitHub CLI as the standard remote operations capability', () => {
+  const project = tempProject();
+  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-readiness-gh-bin-'));
+  installFakeGh(fakeBin);
+
+  const result = spawnSync(readinessBin, [
+    '--target', project,
+    '--mode', 'docs-only',
+    '--skip-code-context',
+    '--json',
+  ], {
+    cwd: root,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      HOME: '/tmp/gstack-readiness-test-home',
+      PATH: `${fakeBin}:${testPath}`,
+    },
+  });
+
+  assert.notEqual(result.status, null, result.stderr || result.stdout);
+  const output = JSON.parse(result.stdout);
+  assert.deepEqual(output.github_cli, {
+    status: 'ready',
+    auth: 'authenticated',
+    command: 'gh',
+    owns: ['github_remote', 'ci_runs', 'pull_requests', 'workflow_runs'],
+  });
+
+  const state = JSON.parse(fs.readFileSync(path.join(project, '.gstack', 'project-state.json'), 'utf8'));
+  assert.equal(state.github_cli.status, 'ready');
+  assert.equal(state.github_cli.auth, 'authenticated');
+  assert.equal(state.release.github_cli_required, true);
+  assert.equal(state.release.github_cli_status, 'ready');
+
+  const report = fs.readFileSync(path.join(project, 'docs', 'FOUNDATION_READINESS_REPORT.md'), 'utf8');
+  assert.match(report, /\| GitHub CLI \| ready \| auth: authenticated; standard remote\/CI\/PR path: gh CLI \|/);
+
+  const projectState = fs.readFileSync(path.join(project, 'PROJECT_STATE.md'), 'utf8');
+  assert.match(projectState, /## GitHub CLI/);
+  assert.match(projectState, /- Standard remote\/CI\/PR path: gh CLI/);
+});
+
 test('readiness detects stale code context when status commit differs from HEAD', () => {
   const project = tempProject();
   const firstHead = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: project, encoding: 'utf8' }).stdout.trim();

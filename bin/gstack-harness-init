@@ -139,7 +139,7 @@ array_contains() {
 
 is_readiness_warning() {
   case "$1" in
-    gbrain_empty|gbrain_core_pages_missing|gbrain_project_memory_missing|gbrain_project_memory_stale|gbrain_project_memory_sync_failed|gbrain_project_memory_sync_timeout|gbrain_query_timeout|gbrain_query_failed|gbrain_sync_off|runtime_missing|not_git_repo|browse_missing|code_context_status_failed|gbrain_seed_failed|gbrain_seed_timeout)
+    gbrain_empty|gbrain_core_pages_missing|gbrain_project_memory_missing|gbrain_project_memory_stale|gbrain_project_memory_sync_failed|gbrain_project_memory_sync_timeout|gbrain_query_timeout|gbrain_query_failed|gbrain_sync_off|runtime_missing|not_git_repo|browse_missing|code_context_status_failed|gbrain_seed_failed|gbrain_seed_timeout|github_cli_missing|github_cli_unauthenticated)
       return 0
       ;;
     *)
@@ -203,6 +203,14 @@ detect_bun_bin() {
       return 0
     fi
   done
+  return 1
+}
+
+detect_github_cli() {
+  if command -v gh >/dev/null 2>&1; then
+    command -v gh
+    return 0
+  fi
   return 1
 }
 
@@ -517,6 +525,22 @@ if git -C "$TARGET_DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
   GIT_REMOTE_URL="$(git -C "$TARGET_DIR" config --get remote.origin.url 2>/dev/null || true)"
 fi
 
+GITHUB_CLI_STATUS="missing"
+GITHUB_CLI_AUTH="unknown"
+GITHUB_CLI_COMMAND="gh"
+GITHUB_CLI_BIN=""
+if GITHUB_CLI_BIN="$(detect_github_cli 2>/dev/null)"; then
+  if "$GITHUB_CLI_BIN" --version >/dev/null 2>&1; then
+    if "$GITHUB_CLI_BIN" auth status >/dev/null 2>&1; then
+      GITHUB_CLI_STATUS="ready"
+      GITHUB_CLI_AUTH="authenticated"
+    else
+      GITHUB_CLI_STATUS="unauthenticated"
+      GITHUB_CLI_AUTH="unauthenticated"
+    fi
+  fi
+fi
+
 REPOSITORY_STATUS="ready"
 REPOSITORY_NEXT_ACTION="none"
 CODE_CONTEXT_GATE="missing"
@@ -579,6 +603,11 @@ INSTALL_PREFLIGHT_JSON="$(cat <<EOF
     "status": "$GIT_STATUS",
     "branch": "$(json_escape "$BRANCH")",
     "remote_url": "$(json_escape "$GIT_REMOTE_URL")"
+  },
+  "github_cli": {
+    "status": "$(json_escape "$GITHUB_CLI_STATUS")",
+    "auth": "$(json_escape "$GITHUB_CLI_AUTH")",
+    "command": "$(json_escape "$GITHUB_CLI_COMMAND")"
   },
   "sensitive_paths": $SENSITIVE_PATHS_JSON,
   "planned_writes": [
@@ -704,6 +733,15 @@ fi
 if [ "$BROWSE_STATUS" != "ready" ]; then
   WARNINGS+=("browse_missing")
 fi
+
+case "$GITHUB_CLI_STATUS" in
+  missing)
+    WARNINGS+=("github_cli_missing")
+    ;;
+  unauthenticated)
+    WARNINGS+=("github_cli_unauthenticated")
+    ;;
+esac
 
 EXISTING_PHASE=""
 EXISTING_NEXT_AGENT=""
@@ -893,6 +931,14 @@ PRODUCTION_URL="$(preserve_runtime_value "${PRODUCTION_URL:-}" "$EXISTING_PRODUC
 
 RELEASE_BLOCKERS=()
 [ -z "$GIT_REMOTE_URL" ] && RELEASE_BLOCKERS+=("no_remote_repository")
+case "$GITHUB_CLI_STATUS" in
+  missing)
+    RELEASE_BLOCKERS+=("github_cli_missing")
+    ;;
+  unauthenticated)
+    RELEASE_BLOCKERS+=("github_cli_unauthenticated")
+    ;;
+esac
 case "${PRODUCTION_URL:-}" in
   ""|not_required)
     RELEASE_BLOCKERS+=("no_deploy_target")
@@ -904,7 +950,7 @@ DEPLOYMENT_GATE="$EXISTING_DEPLOYMENT_GATE"
 if [ "${#RELEASE_BLOCKERS[@]}" -gt 0 ] && ! is_completed_gate "$EXISTING_DEPLOYMENT_GATE"; then
   RELEASE_STATUS="blocked_by_environment"
   DEPLOYMENT_GATE="blocked"
-  RELEASE_NEXT_ACTION="configure a remote repository and deploy target before release"
+  RELEASE_NEXT_ACTION="configure GitHub CLI, remote repository, and deploy target before release"
 elif is_completed_gate "$EXISTING_DEPLOYMENT_GATE"; then
   RELEASE_STATUS="completed"
   RELEASE_NEXT_ACTION="none"
@@ -1326,6 +1372,13 @@ PROJECT_STATE_CONTENT="$(cat <<EOF
 - Code Context: $CODE_CONTEXT_GATE
 - Long-term readiness: $LONG_TERM_READINESS_STATUS
 - Next action: $REPOSITORY_NEXT_ACTION
+
+## GitHub CLI
+
+- GitHub CLI: $GITHUB_CLI_STATUS
+- Auth: $GITHUB_CLI_AUTH
+- Command: $GITHUB_CLI_COMMAND
+- Standard remote/CI/PR path: gh CLI
 
 ## Runtime
 
@@ -1770,6 +1823,12 @@ PROJECT_STATE_JSON="$(cat <<EOF
     "baseline_required": $([ "$REPOSITORY_STATUS" = "needs_git_baseline" ] && printf 'true' || printf 'false'),
     "next_action": "$(json_escape "$REPOSITORY_NEXT_ACTION")"
   },
+  "github_cli": {
+    "status": "$(json_escape "$GITHUB_CLI_STATUS")",
+    "auth": "$(json_escape "$GITHUB_CLI_AUTH")",
+    "command": "$(json_escape "$GITHUB_CLI_COMMAND")",
+    "owns": ["github_remote", "ci_runs", "pull_requests", "workflow_runs"]
+  },
   "long_term_readiness": {
     "status": "$(json_escape "$LONG_TERM_READINESS_STATUS")",
     "blockers": $(json_array "${LONG_TERM_BLOCKERS[@]}")
@@ -1844,6 +1903,8 @@ PROJECT_STATE_JSON="$(cat <<EOF
     "blockers": $(json_array "${RELEASE_BLOCKERS[@]}"),
     "remote_url": "$(json_escape "$GIT_REMOTE_URL")",
     "production_url": "$(json_escape "${PRODUCTION_URL:-}")",
+    "github_cli_required": true,
+    "github_cli_status": "$(json_escape "$GITHUB_CLI_STATUS")",
     "next_action": "$(json_escape "$RELEASE_NEXT_ACTION")"
   },
   "artifacts": {
@@ -2061,6 +2122,7 @@ Verdict: $FOUNDATION_VERDICT
 | agent team | ready | .gstack/harness/agents/TEAM.md |
 | problem handling | $([ "$PROBLEM_HANDLING_REQUIRED" -eq 1 ] && printf 'required' || printf 'not_needed') | .gstack/harness/agents/problem-handling.md |
 | git state | $GIT_STATUS | branch: $BRANCH |
+| GitHub CLI | $GITHUB_CLI_STATUS | auth: $GITHUB_CLI_AUTH; standard remote/CI/PR path: gh CLI |
 | repository baseline | $REPOSITORY_STATUS | $REPOSITORY_NEXT_ACTION |
 | long-term readiness | $LONG_TERM_READINESS_STATUS | blockers: ${LONG_TERM_BLOCKERS[*]:-none} |
 | runtime | $RUNTIME_STATUS | mode: $EFFECTIVE_MODE |
@@ -2207,8 +2269,9 @@ CODEX_START_PROMPT="$(cat <<EOF
 13. 先输出当前 phase、Foundation Readiness、blockers/warnings、推荐 recipe、推荐 agent、是否需要刷新 memory/code context，以及简短原因。
 14. 判断用户当前话语时，先结合同一个 session 内最近 1-2 次 Codex 输出，区分确认、纠正、补充需求、改变方向、指出缺失上下文或升级信号；需要长期沉淀时只记录摘要和 inferred delta，不保存完整 transcript。
 $CODEX_SESSION_STEPS
-18. 完成状态更新后必须用 .gstack/harness/bin/gstack-harness-record-run --event session_end --status completed 记录 usage run；如有卡点、用户纠正、能力缺口、warning 或 blocker，把对应参数带上。
-19. 除非我明确要求，不要开始业务代码修改。
+18. GitHub remote/CI/PR/run 操作必须使用 \`gh\` CLI；本地 repo 状态、diff、add、commit 仍使用 \`git\`。
+19. 完成状态更新后必须用 .gstack/harness/bin/gstack-harness-record-run --event session_end --status completed 记录 usage run；如有卡点、用户纠正、能力缺口、warning 或 blocker，把对应参数带上。
+20. 除非我明确要求，不要开始业务代码修改。
 
 当前安装器给出的初始判断：
 
@@ -2216,6 +2279,7 @@ $CODEX_SESSION_STEPS
 - Target: $TARGET_DIR
 - Install mode: $EFFECTIVE_MODE
 - Foundation verdict: $FOUNDATION_VERDICT
+- GitHub CLI: $GITHUB_CLI_STATUS ($GITHUB_CLI_AUTH)
 - gbrain query: $GBRAIN_QUERY_STATUS
 - Problem handling required: $([ "$PROBLEM_HANDLING_REQUIRED" -eq 1 ] && printf 'yes' || printf 'no')
 - Next recommended agent: $NEXT_AGENT

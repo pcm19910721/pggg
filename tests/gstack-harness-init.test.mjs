@@ -60,6 +60,67 @@ process.exit(0);
   fs.chmodSync(gbrain, 0o755);
 }
 
+function installFakeGh(bin, authExitCode = 0) {
+  fs.mkdirSync(bin, { recursive: true });
+  const gh = path.join(bin, 'gh');
+  fs.writeFileSync(gh, `#!/usr/bin/env bash
+if [ "$1" = "--version" ]; then
+  echo "gh version 2.0.0"
+  exit 0
+fi
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  exit ${authExitCode}
+fi
+exit 0
+`);
+  fs.chmodSync(gh, 0o755);
+}
+
+test('init records GitHub CLI as the standard remote operations capability', () => {
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-init-gh-cli-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-init-home-'));
+  installFakeGstackHome(home);
+  installFakeGh(path.join(home, 'bin'));
+
+  const result = spawnSync(initBin, [
+    '--target', target,
+    '--project-id', 'gstack-init-ready',
+    '--mode', 'docs-only',
+    '--no-start-codex',
+  ], {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: 100_000,
+    env: {
+      ...process.env,
+      HOME: home,
+      PATH: `${home}/bin:${testPath}`,
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  const state = JSON.parse(fs.readFileSync(path.join(target, '.gstack', 'project-state.json'), 'utf8'));
+  assert.deepEqual(state.github_cli, {
+    status: 'ready',
+    auth: 'authenticated',
+    command: 'gh',
+    owns: ['github_remote', 'ci_runs', 'pull_requests', 'workflow_runs'],
+  });
+  assert.equal(state.release.github_cli_required, true);
+  assert.equal(state.release.github_cli_status, 'ready');
+
+  const projectState = fs.readFileSync(path.join(target, 'PROJECT_STATE.md'), 'utf8');
+  assert.match(projectState, /## GitHub CLI/);
+  assert.match(projectState, /- GitHub CLI: ready/);
+  assert.match(projectState, /- Auth: authenticated/);
+  assert.match(projectState, /- Standard remote\/CI\/PR path: gh CLI/);
+
+  const codexPrompt = fs.readFileSync(path.join(target, 'docs', 'CODEX_START_PROMPT.md'), 'utf8');
+  assert.match(codexPrompt, /GitHub remote\/CI\/PR\/run 操作必须使用 `gh` CLI/);
+  assert.match(codexPrompt, /本地 repo 状态、diff、add、commit 仍使用 `git`/);
+});
+
 test('init renders repeat work promotion state into installed targets', () => {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-init-repeat-work-'));
   const result = spawnSync(initBin, [

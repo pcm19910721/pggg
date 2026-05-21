@@ -106,6 +106,14 @@ detect_bun_bin() {
   return 1
 }
 
+detect_github_cli() {
+  if command -v gh >/dev/null 2>&1; then
+    command -v gh
+    return 0
+  fi
+  return 1
+}
+
 activate_gbrain_path() {
   local gbrain_bin="$1"
   local bun_bin=""
@@ -171,6 +179,22 @@ if git -C "$TARGET_DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
   BRANCH="$(git -C "$TARGET_DIR" branch --show-current 2>/dev/null || true)"
   BRANCH="${BRANCH:-unknown}"
   GIT_HEAD="$(git -C "$TARGET_DIR" rev-parse HEAD 2>/dev/null || true)"
+fi
+
+GITHUB_CLI_STATUS="missing"
+GITHUB_CLI_AUTH="unknown"
+GITHUB_CLI_COMMAND="gh"
+GITHUB_CLI_BIN=""
+if GITHUB_CLI_BIN="$(detect_github_cli 2>/dev/null)"; then
+  if "$GITHUB_CLI_BIN" --version >/dev/null 2>&1; then
+    if "$GITHUB_CLI_BIN" auth status >/dev/null 2>&1; then
+      GITHUB_CLI_STATUS="ready"
+      GITHUB_CLI_AUTH="authenticated"
+    else
+      GITHUB_CLI_STATUS="unauthenticated"
+      GITHUB_CLI_AUTH="unauthenticated"
+    fi
+  fi
 fi
 
 GBRAIN_STATUS="unavailable"
@@ -275,6 +299,9 @@ GBRAIN_SYNC_MODE="$GBRAIN_SYNC_MODE" \
 GIT_STATUS="$GIT_STATUS" \
 BRANCH="$BRANCH" \
 GIT_HEAD="$GIT_HEAD" \
+GITHUB_CLI_STATUS="$GITHUB_CLI_STATUS" \
+GITHUB_CLI_AUTH="$GITHUB_CLI_AUTH" \
+GITHUB_CLI_COMMAND="$GITHUB_CLI_COMMAND" \
 GBRAIN_STATUS="$GBRAIN_STATUS" \
 GBRAIN_PAGES="$GBRAIN_PAGES" \
 GBRAIN_CORE_MISSING="$GBRAIN_CORE_MISSING" \
@@ -479,6 +506,8 @@ function withoutReadinessWarnings(items) {
     'gbrain_project_memory_stale',
     'gbrain_project_memory_sync_timeout',
     'gitnexus_detect_changes_critical_due_large_dirty_worktree',
+    'github_cli_missing',
+    'github_cli_unauthenticated',
   ]);
   return items.filter((item) => !readinessWarnings.has(String(item)));
 }
@@ -513,8 +542,16 @@ if (env.GSTACK_STATUS !== 'ready') blockers.push('gstack_unavailable');
 if (runtime.status === 'missing_commands' && mode === 'app') warnings.push('runtime_missing');
 if (env.GIT_STATUS !== 'ready' && mode === 'app') warnings.push('not_git_repo');
 if (env.BROWSE_STATUS !== 'ready') warnings.push('browse_missing');
+if (env.GITHUB_CLI_STATUS === 'missing') warnings.push('github_cli_missing');
+if (env.GITHUB_CLI_STATUS === 'unauthenticated') warnings.push('github_cli_unauthenticated');
 
 const repositoryNeedsBaseline = env.GIT_STATUS !== 'ready' && mode === 'app';
+const githubCli = {
+  status: env.GITHUB_CLI_STATUS,
+  auth: env.GITHUB_CLI_AUTH,
+  command: env.GITHUB_CLI_COMMAND || 'gh',
+  owns: ['github_remote', 'ci_runs', 'pull_requests', 'workflow_runs'],
+};
 const repository = {
   ...(state.repository || {}),
   status: repositoryNeedsBaseline ? 'needs_git_baseline' : 'ready',
@@ -602,6 +639,7 @@ nextState.foundation = {
   last_readiness_check: env.GENERATED_AT,
   problem_handling_required: ['timeout', 'failed'].includes(env.GBRAIN_QUERY_STATUS),
 };
+nextState.github_cli = githubCli;
 nextState.repository = repository;
 nextState.long_term_readiness = longTermReadiness;
 function mergeRuntimeValue(nextValue, previousValue) {
@@ -630,6 +668,8 @@ nextState.runtime = {
 const releaseBlockers = [];
 const remoteUrl = env.GIT_REMOTE_URL || state.release?.remote_url || '';
 if (!remoteUrl) releaseBlockers.push('no_remote_repository');
+if (githubCli.status === 'missing') releaseBlockers.push('github_cli_missing');
+if (githubCli.status === 'unauthenticated') releaseBlockers.push('github_cli_unauthenticated');
 if (!nextState.runtime.production_url || nextState.runtime.production_url === 'not_required') releaseBlockers.push('no_deploy_target');
 const existingDeployment = state.quality_gates?.deployment || 'not_started';
 const deploymentGate = releaseBlockers.length && !isCompletedGate(existingDeployment) ? 'blocked' : existingDeployment;
@@ -641,8 +681,10 @@ nextState.release = {
   blockers: releaseBlockers,
   remote_url: remoteUrl,
   production_url: nextState.runtime.production_url || '',
+  github_cli_required: true,
+  github_cli_status: githubCli.status,
   next_action: releaseBlockers.length
-    ? 'configure a remote repository and deploy target before release'
+    ? 'configure GitHub CLI, remote repository, and deploy target before release'
     : state.release?.next_action || 'none',
 };
 nextState.quality_gates = {
@@ -700,6 +742,7 @@ Verdict: ${verdict}
 | gstack memory sync | ${env.GBRAIN_SYNC_MODE} | gstack-config gbrain_sync_mode |
 | project protocol | ready | harness state and reports present |
 | git state | ${env.GIT_STATUS} | branch: ${env.BRANCH} |
+| GitHub CLI | ${githubCli.status} | auth: ${githubCli.auth}; standard remote/CI/PR path: gh CLI |
 | repository baseline | ${repository.status} | ${repository.next_action} |
 | long-term readiness | ${longTermReadiness.status} | blockers: ${mdList(longTermReadiness.blockers)} |
 | runtime | ${runtime.status} | mode: ${mode}; test: ${runtime.test || ''}; dev: ${runtime.dev || ''} |
@@ -727,6 +770,9 @@ if (!env.DRY_RUN || env.DRY_RUN !== '1') {
   fs.writeFileSync(readinessReportPath, report, 'utf8');
   if (fs.existsSync(projectStatePath)) {
     let md = fs.readFileSync(projectStatePath, 'utf8');
+    if (!md.includes('## GitHub CLI')) {
+      md = `${md.trimEnd()}\n\n## GitHub CLI\n`;
+    }
     md = replaceOrAppend(md, /^- Readiness: .*$/m, `- Readiness: ${verdict}`, '## Foundation');
     md = replaceOrAppend(md, /^- Last readiness check: .*$/m, '- Last readiness check: docs/FOUNDATION_READINESS_REPORT.md', '## Foundation');
     md = replaceOrAppend(md, /^- gbrain: .*$/m, `- gbrain: ${env.GBRAIN_STATUS}`, '## Foundation');
@@ -736,6 +782,10 @@ if (!env.DRY_RUN || env.DRY_RUN !== '1') {
     md = replaceOrAppend(md, /^- Repository: .*$/m, `- Repository: ${repository.status}`, '## Repository Baseline');
     md = replaceOrAppend(md, /^- Git state: .*$/m, `- Git state: ${env.GIT_STATUS}`, '## Repository Baseline');
     md = replaceOrAppend(md, /^- Long-term readiness: .*$/m, `- Long-term readiness: ${longTermReadiness.status}`, '## Repository Baseline');
+    md = replaceOrAppend(md, /^- GitHub CLI: .*$/m, `- GitHub CLI: ${githubCli.status}`, '## GitHub CLI');
+    md = replaceOrAppend(md, /^- Auth: .*$/m, `- Auth: ${githubCli.auth}`, '## GitHub CLI');
+    md = replaceOrAppend(md, /^- Command: .*$/m, `- Command: ${githubCli.command}`, '## GitHub CLI');
+    md = replaceOrAppend(md, /^- Standard remote\/CI\/PR path: .*$/m, '- Standard remote/CI/PR path: gh CLI', '## GitHub CLI');
     md = replaceOrAppend(md, /^- Foundation Readiness: .*$/m, `- Foundation Readiness: ${verdict}`, '## Quality Gates');
     md = replaceOrAppend(md, /^- Code Context: .*$/m, `- Code Context: ${codeContextStatus}`, '## Quality Gates');
     md = replaceOrAppend(md, /^- Next recommended agent: .*$/m, `- Next recommended agent: ${nextAgent}`, '## Current');
@@ -759,6 +809,7 @@ const summary = {
   gbrain_query: env.GBRAIN_QUERY_STATUS,
   gstack: env.GSTACK_STATUS,
   git: env.GIT_STATUS,
+  github_cli: githubCli,
   repository,
   long_term_readiness: longTermReadiness,
   runtime: runtime.status,
