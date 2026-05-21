@@ -11,7 +11,7 @@ Usage:
 
 Flow:
   1. Detect the current project and foundation readiness.
-  2. Upgrade harness protocol files with .bak backups.
+  2. Upgrade harness protocol files with centralized .gstack/backups snapshots.
   3. Merge the CLAUDE.md managed block.
   4. Render PROJECT_STATE.md, .gstack/project-state.json, readiness report, and Codex start prompt.
   5. Record a structured usage run for feedback aggregation.
@@ -230,8 +230,29 @@ has_file() {
 backup_existing() {
   local path="$1"
   if [ -e "$path" ] && [ "$DRY_RUN" -ne 1 ]; then
-    cp -a "$path" "$path.bak-$STAMP"
-    log "backup ${path#$TARGET_DIR/} -> ${path#$TARGET_DIR/}.bak-$STAMP"
+    local rel="${path#$TARGET_DIR/}"
+    local backup="$TARGET_DIR/.gstack/backups/$STAMP/$rel"
+    mkdir -p "$(dirname "$backup")"
+    cp -a "$path" "$backup"
+    log "backup $rel -> .gstack/backups/$STAMP/$rel"
+  fi
+}
+
+ensure_gitignore_entry() {
+  local pattern="$1"
+  local gitignore="$TARGET_DIR/.gitignore"
+  if [ "$GIT_STATUS" != "ready" ] && [ ! -f "$gitignore" ]; then
+    return 0
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "DRY_RUN ensure .gitignore contains $pattern"
+    return 0
+  fi
+  mkdir -p "$(dirname "$gitignore")"
+  touch "$gitignore"
+  if ! grep -Fxq "$pattern" "$gitignore" 2>/dev/null; then
+    printf '%s\n' "$pattern" >> "$gitignore"
+    log "updated .gitignore with $pattern"
   fi
 }
 
@@ -524,6 +545,7 @@ if git -C "$TARGET_DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
   BRANCH="${BRANCH:-unknown}"
   GIT_REMOTE_URL="$(git -C "$TARGET_DIR" config --get remote.origin.url 2>/dev/null || true)"
 fi
+ensure_gitignore_entry ".gstack/backups/"
 
 GITHUB_CLI_STATUS="missing"
 GITHUB_CLI_AUTH="unknown"

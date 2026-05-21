@@ -76,6 +76,23 @@ exit 0
   fs.chmodSync(gh, 0o755);
 }
 
+function listRelativeFiles(dir) {
+  const files = [];
+  function walk(current) {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      const rel = path.relative(dir, full).split(path.sep).join('/');
+      if (entry.isDirectory()) {
+        walk(full);
+      } else {
+        files.push(rel);
+      }
+    }
+  }
+  walk(dir);
+  return files;
+}
+
 test('init records GitHub CLI as the standard remote operations capability', () => {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-init-gh-cli-'));
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-init-home-'));
@@ -119,6 +136,42 @@ test('init records GitHub CLI as the standard remote operations capability', () 
   const codexPrompt = fs.readFileSync(path.join(target, 'docs', 'CODEX_START_PROMPT.md'), 'utf8');
   assert.match(codexPrompt, /GitHub remote\/CI\/PR\/run 操作必须使用 `gh` CLI/);
   assert.match(codexPrompt, /本地 repo 状态、diff、add、commit 仍使用 `git`/);
+});
+
+test('init centralizes reinstall backups under ignored harness backup directory', () => {
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-init-central-backups-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-init-home-'));
+  installFakeGstackHome(home);
+  spawnSync('git', ['init'], { cwd: target, encoding: 'utf8' });
+  spawnSync('git', ['config', 'user.email', 'init-backups@example.test'], { cwd: target, encoding: 'utf8' });
+  spawnSync('git', ['config', 'user.name', 'Init Backups Test'], { cwd: target, encoding: 'utf8' });
+  fs.writeFileSync(path.join(target, '.gitignore'), 'node_modules/\n');
+
+  const env = {
+    ...process.env,
+    HOME: home,
+    PATH: `${home}/bin:${testPath}`,
+  };
+  for (let i = 0; i < 2; i += 1) {
+    const result = spawnSync(initBin, [
+      '--target', target,
+      '--project-id', 'gstack-init-ready',
+      '--mode', 'docs-only',
+      '--no-start-codex',
+    ], {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 100_000,
+      env,
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  }
+
+  const allFiles = listRelativeFiles(target);
+  assert.equal(allFiles.some((file) => /\.bak-\d{8}-\d{6}$/.test(file) && !file.startsWith('.gstack/backups/')), false);
+  assert.equal(allFiles.some((file) => file.startsWith('.gstack/backups/')), true);
+  const gitignore = fs.readFileSync(path.join(target, '.gitignore'), 'utf8');
+  assert.match(gitignore, /^\.gstack\/backups\/$/m);
 });
 
 test('init renders repeat work promotion state into installed targets', () => {

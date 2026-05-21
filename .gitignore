@@ -24,6 +24,7 @@ Thumbs.db
 .gstack/workspace-hygiene.json
 .gstack/workspace-hygiene-baseline.json
 .gstack/*-last.*
+.gstack/backups/
 .gstack/scheduler/
 .gstack/harness/agents/
 .gstack/harness/bin/
