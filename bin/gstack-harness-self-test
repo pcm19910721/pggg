@@ -10,6 +10,7 @@ INSTALL_DIR="$TMP_ROOT/install"
 PRESERVE_DIR="$TMP_ROOT/preserve"
 FAKE_BIN="$TMP_ROOT/fake-bin"
 FAKE_HOME="$TMP_ROOT/home"
+NODE_PATH_DIR="$(dirname "$(command -v node)")"
 
 cleanup() {
   rm -rf "$TMP_ROOT"
@@ -557,7 +558,7 @@ fi
 exec "$BUN_BIN" "$HOME/gbrain/src/cli.ts" "$@"
 EOF
   chmod +x "$home_fallback_home/.bun/bin/bun" "$home_fallback_home/.bun/bin/gbrain" "$home_fallback_home/.bun/bin/gbrain-real"
-  HOME="$home_fallback_home" PATH="/usr/bin:/bin" "$home_fallback_home/.bun/bin/gbrain" --version > "$TMP_ROOT/home-fallback-wrapper-version.out"
+  HOME="$home_fallback_home" PATH="$NODE_PATH_DIR:/usr/bin:/bin" "$home_fallback_home/.bun/bin/gbrain" --version > "$TMP_ROOT/home-fallback-wrapper-version.out"
   assert_contains "$TMP_ROOT/home-fallback-wrapper-version.out" "gbrain-test 0.0.0"
   GBRAIN_STORE_PATH="$home_fallback_store" "$home_fallback_home/.bun/bin/gbrain-real" put "project/homefallback/overview" --content "# overview"
   GBRAIN_STORE_PATH="$home_fallback_store" "$home_fallback_home/.bun/bin/gbrain-real" put "project/homefallback/state" --content "# state"
@@ -568,10 +569,10 @@ EOF
   GBRAIN_STORE_PATH="$home_fallback_store" "$home_fallback_home/.bun/bin/gbrain-real" put "project/homefallback/architecture" --content "# architecture"
   GBRAIN_STORE_PATH="$home_fallback_store" "$home_fallback_home/.bun/bin/gbrain-real" put "project/homefallback/hotspots" --content "# hotspots"
   GBRAIN_STORE_PATH="$home_fallback_store" "$home_fallback_home/.bun/bin/gbrain-real" put "project/homefallback/handoff" --content "# handoff"
-  GSTACK_HARNESS_REGISTRY="$TMP_ROOT/projects.jsonl" GBRAIN_STORE_PATH="$home_fallback_store" HOME="$home_fallback_home" PATH="/usr/bin:/bin" "$INIT" --target "$home_fallback_dir" --project-id homefallback --mode docs-only --no-start-codex > "$home_fallback_dir/init.out"
+  GSTACK_HARNESS_REGISTRY="$TMP_ROOT/projects.jsonl" GBRAIN_STORE_PATH="$home_fallback_store" HOME="$home_fallback_home" PATH="$NODE_PATH_DIR:/usr/bin:/bin" "$INIT" --target "$home_fallback_dir" --project-id homefallback --mode docs-only --no-start-codex > "$home_fallback_dir/init.out"
   assert_json_field "$home_fallback_dir/.gstack/project-state.json" "state.foundation.gbrain === 'ready'" "readiness did not discover gbrain from HOME/.bun/bin when PATH omitted it"
   assert_json_field "$home_fallback_dir/.gstack/project-state.json" "!state.blockers.includes('gbrain_unavailable')" "HOME/.bun/bin gbrain fallback still reported gbrain_unavailable"
-  (cd "$home_fallback_dir" && GBRAIN_STORE_PATH="$home_fallback_store" HOME="$home_fallback_home" PATH="/usr/bin:/bin" node scripts/ai-context-bridge.mjs sync-gbrain --page overview > "$TMP_ROOT/home-fallback-sync.out")
+  (cd "$home_fallback_dir" && GBRAIN_STORE_PATH="$home_fallback_store" HOME="$home_fallback_home" PATH="$NODE_PATH_DIR:/usr/bin:/bin" node scripts/ai-context-bridge.mjs sync-gbrain --page overview > "$TMP_ROOT/home-fallback-sync.out")
   assert_json_field "$TMP_ROOT/home-fallback-sync.out" "state.event === 'sync_gbrain' && state.status === 'synced'" "bridge sync-gbrain did not use HOME/.bun/bin gbrain fallback"
   assert_json_field "$TMP_ROOT/home-fallback-sync.out" "!state.warnings.includes('gbrain_unavailable')" "bridge sync-gbrain fallback still reported gbrain_unavailable"
 
