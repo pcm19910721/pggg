@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const initBin = path.join(root, 'bin', 'gstack-harness-init');
+const testPath = `${path.dirname(process.execPath)}:/usr/bin:/bin`;
 
 test('init renders repeat work promotion state into installed targets', () => {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-init-repeat-work-'));
@@ -22,7 +23,7 @@ test('init renders repeat work promotion state into installed targets', () => {
     env: {
       ...process.env,
       HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-init-home-')),
-      PATH: '/usr/bin:/bin',
+      PATH: testPath,
     },
   });
 
@@ -75,7 +76,7 @@ test('init preserves existing repeat work promotion state on reinstall', () => {
   const env = {
     ...process.env,
     HOME: home,
-    PATH: '/usr/bin:/bin',
+    PATH: testPath,
   };
 
   const first = spawnSync(initBin, [
@@ -132,7 +133,7 @@ test('installed remediation restores missing atomic commit runner', () => {
   const env = {
     ...process.env,
     HOME: home,
-    PATH: '/usr/bin:/bin',
+    PATH: testPath,
   };
 
   const installed = spawnSync(initBin, [
@@ -171,7 +172,7 @@ test('installed init can run without the original template source', () => {
   const env = {
     ...process.env,
     HOME: home,
-    PATH: '/usr/bin:/bin',
+    PATH: testPath,
   };
 
   const installed = spawnSync(initBin, [

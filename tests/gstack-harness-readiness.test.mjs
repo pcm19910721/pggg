@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const readinessBin = path.join(root, 'bin', 'gstack-harness-readiness');
+const testPath = `${path.dirname(process.execPath)}:/usr/bin:/bin`;
 
 function tempProject() {
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-readiness-test-'));
@@ -96,7 +97,7 @@ test('readiness detects stale code context when status commit differs from HEAD'
     env: {
       ...process.env,
       HOME: '/tmp/gstack-readiness-test-home',
-      PATH: '/usr/bin:/bin',
+      PATH: testPath,
     },
   });
 
@@ -154,7 +155,7 @@ test('readiness includes workspace hygiene status from installed report', () => 
     env: {
       ...process.env,
       HOME: '/tmp/gstack-readiness-test-home',
-      PATH: '/usr/bin:/bin',
+      PATH: testPath,
     },
   });
 
