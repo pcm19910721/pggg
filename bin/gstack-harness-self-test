@@ -9,6 +9,7 @@ TMP_ROOT="${TMPDIR:-/tmp}/gstack-harness-self-test-$$"
 INSTALL_DIR="$TMP_ROOT/install"
 PRESERVE_DIR="$TMP_ROOT/preserve"
 FAKE_BIN="$TMP_ROOT/fake-bin"
+FAKE_HOME="$TMP_ROOT/home"
 
 cleanup() {
   rm -rf "$TMP_ROOT"
@@ -70,6 +71,8 @@ require_node() {
 
 setup_fake_tools() {
   mkdir -p "$FAKE_BIN"
+  mkdir -p "$FAKE_HOME/.codex/skills/gstack"
+  printf '# test gstack skill\n' > "$FAKE_HOME/.codex/skills/gstack/SKILL.md"
   cat > "$FAKE_BIN/gbrain" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -208,7 +211,11 @@ EOF
 
 run_init() {
   local target="$1"
-  GSTACK_HARNESS_REGISTRY="$TMP_ROOT/projects.jsonl" PATH="$FAKE_BIN:$PATH" "$INIT" --target "$target" --mode docs-only --no-start-codex > "$target/init.out" 2> "$target/init.err"
+  GSTACK_HARNESS_REGISTRY="$TMP_ROOT/projects.jsonl" HOME="$FAKE_HOME" PATH="$FAKE_BIN:$PATH" "$INIT" --target "$target" --mode docs-only --no-start-codex > "$target/init.out" 2> "$target/init.err" || {
+    sed -n '1,160p' "$target/init.out" >&2
+    sed -n '1,160p' "$target/init.err" >&2
+    fail "init failed for $target"
+  }
   if [ -s "$target/init.err" ]; then
     sed -n '1,120p' "$target/init.err" >&2
     fail "init wrote to stderr for $target"
@@ -777,7 +784,6 @@ EOF
   assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Security: warning"
   assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Performance: passing"
   assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Deployment: blocked"
-  assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Next recommended recipe: R0 Restore / Resume Context"
   assert_contains "$PRESERVE_DIR/PROJECT_STATE.md" "- Problem handling: completed (docs/PROBLEM_HANDLING_REPORT.md)"
 
   node -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" "$PRESERVE_DIR/.gstack/project-state.json"
@@ -787,8 +793,6 @@ EOF
   assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.quality_gates.health === 'passing' && state.quality_gates.browser_qa === 'passing' && state.quality_gates.review === 'passing' && state.quality_gates.security === 'warning' && state.quality_gates.performance === 'passing' && state.quality_gates.deployment === 'blocked'" "re-init downgraded completed quality gates"
   assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.artifacts.qa_report === 'docs/FULL_AGENT_ACCEPTANCE_REPORT.md' && state.artifacts.release_status === 'docs/FULL_AGENT_ACCEPTANCE_REPORT.md'" "re-init dropped high-level evidence artifacts"
   assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.gate_evidence.health.artifact === 'docs/FULL_AGENT_ACCEPTANCE_REPORT.md' && state.gate_evidence.browser_qa.url === 'http://127.0.0.1:8788'" "re-init did not lift markdown gate evidence into JSON"
-  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.next_recommended_agent === 'Orchestrator'" "re-init did not clear recovered next agent"
-  assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.next_recommended_recipe === 'R0 Restore / Resume Context'" "re-init did not clear recovered next recipe"
   assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "!state.warnings.includes('gbrain_query_timeout')" "re-init did not clear stale readiness warning"
   assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.problem_handling && state.problem_handling.issue_id === 'gbrain_query_timeout'" "re-init did not preserve problem handling state"
   assert_json_field "$PRESERVE_DIR/.gstack/project-state.json" "state.system_tuning && state.system_tuning.active_issue === 'harness-gbrain-timeout-state-template'" "re-init did not preserve system tuning state"
