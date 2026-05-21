@@ -161,6 +161,15 @@ Usage feedback automation:
 - After updating project state at the end of the session, record the outcome with `.gstack/harness/bin/gstack-harness-record-run --event session_end --status completed` or the actual status.
 - Include `--where-stalled`, `--user-correction`, `--capability-gap`, `--warning`, and `--blocker` whenever those signals occurred.
 
+Git and CI workflow:
+
+- Before committing, run the relevant local checks plus `npm run verify` unless the change is documentation-only and the reason for skipping is explicit.
+- Before committing, also run GitNexus `detect_changes` for the staged or all-scope diff and confirm the affected scope is expected.
+- Commit in focused groups, then push to `origin/main` only after the local full verification gate is green.
+- After pushing, check the GitHub Actions run and continue fixing until the latest `main` run is green.
+- CI has one canonical verification path: `.github/workflows/test.yml` runs `npm run verify`. Do not add separate duplicate half-gates like `npm test` plus `npm run check:shell` in the workflow.
+- If `npm run verify` changes, update the workflow expectation test so CI and local verification stay aligned.
+
 Prefer real verification:
 
 - Run project tests when relevant.

@@ -70,3 +70,12 @@ This project is indexed by GitNexus as **pggg** (1143 symbols, 1840 relationship
 - Skills are project-local by default. Create a project skill only for a repeated, executable workflow inside this repo. Create or modify global skills only when a workflow is proven across multiple projects and is independent of this repo's business or architecture.
 - Every durable note or rule must have a clear scope, lifetime, and consumer. If those are unclear, keep it temporary or put it in a handoff instead.
 - Durable context must be able to expire: archive or remove stale handoffs, docs, rules, and project skills instead of only promoting them upward.
+
+## Git And CI Workflow
+
+- Before committing, run the relevant local checks plus `npm run verify` unless the change is documentation-only and the reason for skipping is explicit.
+- Before committing, also run GitNexus `detect_changes` for the staged or all-scope diff and confirm the affected scope is expected.
+- Commit in focused groups, then push to `origin/main` only after the local full verification gate is green.
+- After pushing, check the GitHub Actions run and continue fixing until the latest `main` run is green.
+- CI must have one canonical verification path: `.github/workflows/test.yml` runs `npm run verify`. Do not add separate duplicate half-gates like `npm test` plus `npm run check:shell` in the workflow.
+- If `npm run verify` changes, update the workflow expectation test so CI and local verification stay aligned.
