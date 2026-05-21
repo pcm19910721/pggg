@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **gstack-multiagent** (977 symbols, 1581 relationships, 85 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **pggg** (1143 symbols, 1840 relationships, 99 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -24,10 +24,10 @@ This project is indexed by GitNexus as **gstack-multiagent** (977 symbols, 1581 
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/gstack-multiagent/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/gstack-multiagent/clusters` | All functional areas |
-| `gitnexus://repo/gstack-multiagent/processes` | All execution flows |
-| `gitnexus://repo/gstack-multiagent/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/pggg/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/pggg/clusters` | All functional areas |
+| `gitnexus://repo/pggg/processes` | All execution flows |
+| `gitnexus://repo/pggg/process/{name}` | Step-by-step execution trace |
 
 ## CLI
 
@@ -39,7 +39,6 @@ This project is indexed by GitNexus as **gstack-multiagent** (977 symbols, 1581 
 | Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
 | Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
-| Work in the Scripts area (135 symbols) | `.claude/skills/generated/scripts/SKILL.md` |
 
 <!-- gitnexus:end -->
 
