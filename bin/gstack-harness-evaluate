@@ -1,0 +1,273 @@
+#!/usr/bin/env node
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+function usage() {
+  process.stdout.write(`gstack-harness-evaluate - run multi-round harness readiness evaluation
+
+Usage:
+  gstack-harness-evaluate --target DIR [--rounds N] [--init-mode each|once|none] [--json]
+
+Runs init, readiness, and workspace hygiene repeatedly, then writes:
+  .gstack/harness-evaluation.json
+  docs/HARNESS_EVALUATION_REPORT.md
+
+This command writes only harness state and reports.
+`);
+}
+
+let target = '.';
+let rounds = 5;
+let initMode = 'each';
+let printJson = false;
+
+for (let i = 2; i < process.argv.length; i += 1) {
+  const arg = process.argv[i];
+  if (arg === '--target') {
+    target = process.argv[++i] || '';
+  } else if (arg === '--rounds') {
+    rounds = Number.parseInt(process.argv[++i] || '', 10);
+  } else if (arg === '--init-mode') {
+    initMode = process.argv[++i] || '';
+  } else if (arg === '--json') {
+    printJson = true;
+  } else if (arg === '-h' || arg === '--help') {
+    usage();
+    process.exit(0);
+  } else {
+    process.stderr.write(`ERROR: unknown argument: ${arg}\n`);
+    usage();
+    process.exit(2);
+  }
+}
+
+if (!target || !Number.isInteger(rounds) || rounds < 1 || rounds > 20) {
+  process.stderr.write('ERROR: --target is required and --rounds must be 1..20\n');
+  process.exit(2);
+}
+if (!['each', 'once', 'none'].includes(initMode)) {
+  process.stderr.write('ERROR: --init-mode must be each, once, or none\n');
+  process.exit(2);
+}
+
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const targetDir = path.resolve(target);
+fs.mkdirSync(path.join(targetDir, '.gstack'), { recursive: true });
+fs.mkdirSync(path.join(targetDir, 'docs'), { recursive: true });
+
+const commands = {
+  init: process.env.GSTACK_HARNESS_INIT_BIN || path.join(scriptDir, 'gstack-harness-init'),
+  readiness: process.env.GSTACK_HARNESS_READINESS_BIN || path.join(scriptDir, 'gstack-harness-readiness'),
+  hygiene: process.env.GSTACK_HARNESS_HYGIENE_BIN || path.join(scriptDir, 'gstack-harness-workspace-hygiene'),
+};
+
+function run(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    cwd: options.cwd || targetDir,
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024,
+    env: process.env,
+  });
+  return {
+    command: [command, ...args].join(' '),
+    status: result.status,
+    signal: result.signal,
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+    ok: result.status === 0,
+  };
+}
+
+function parseJson(stdout, fallback = {}) {
+  try {
+    return JSON.parse(stdout);
+  } catch {
+    const match = String(stdout || '').match(/\{[\s\S]*\}\s*$/);
+    if (!match) return fallback;
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      return fallback;
+    }
+  }
+}
+
+function gitStatusCount() {
+  const result = run('git', ['status', '--short'], { cwd: targetDir });
+  if (!result.ok) return null;
+  return result.stdout.split(/\r?\n/).filter(Boolean).length;
+}
+
+function walkFiles(dir, out = []) {
+  let entries = [];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    const rel = path.relative(targetDir, full).split(path.sep).join('/');
+    if (entry.isDirectory()) {
+      if (rel === '.git' || rel.startsWith('.git/')) continue;
+      walkFiles(full, out);
+      continue;
+    }
+    if (entry.isFile()) out.push(rel);
+  }
+  return out;
+}
+
+function countScatteredBackups() {
+  return walkFiles(targetDir).filter((file) => /\.bak-\d{8}-\d{6}$/.test(file) && !file.startsWith('.gstack/backups/')).length;
+}
+
+function countCentralBackups() {
+  return walkFiles(path.join(targetDir, '.gstack', 'backups')).length;
+}
+
+function roundStatus(round) {
+  const blockers = [
+    ...(Array.isArray(round.readiness?.blockers) ? round.readiness.blockers : []),
+    ...(Array.isArray(round.hygiene?.blockers) ? round.hygiene.blockers : []),
+  ];
+  if (round.init.status !== 0 && round.init.status !== 'skipped') return 'init_failed';
+  if (round.readiness_status !== 'ready') return 'readiness_not_ready';
+  if (round.git !== 'ready') return 'git_not_ready';
+  if (round.github_cli !== 'ready') return 'github_cli_not_ready';
+  if (round.repository_status !== 'ready') return 'repository_not_ready';
+  if (round.long_term_readiness !== 'ready') return 'long_term_not_ready';
+  if (round.backup_noise_count > 0 || round.scattered_backup_count > 0) return 'backup_noise';
+  if (blockers.length) return 'blocked';
+  return 'ready';
+}
+
+const startedAt = new Date().toISOString();
+const roundResults = [];
+
+for (let i = 1; i <= rounds; i += 1) {
+  process.stderr.write(`harness evaluation round ${i}/${rounds}\n`);
+  const beforeStatusCount = gitStatusCount();
+  const shouldRunInit = initMode === 'each' || (initMode === 'once' && i === 1);
+  const init = shouldRunInit
+    ? run(commands.init, ['--target', targetDir, '--no-start-codex'])
+    : { status: 'skipped', ok: true, stdout: '', stderr: '' };
+  const readinessRun = run(commands.readiness, ['--target', targetDir, '--json']);
+  const readiness = parseJson(readinessRun.stdout, {});
+  const hygieneRun = run(commands.hygiene, ['--target', targetDir, '--json']);
+  const hygiene = parseJson(hygieneRun.stdout, {});
+  const afterStatusCount = gitStatusCount();
+
+  const result = {
+    round: i,
+    init: {
+      status: init.status,
+      ok: init.ok,
+    },
+    readiness_status: readiness.status || 'unknown',
+    git: readiness.git || 'unknown',
+    github_cli: readiness.github_cli?.status || 'unknown',
+    github_cli_auth: readiness.github_cli?.auth || 'unknown',
+    repository_status: readiness.repository?.status || 'unknown',
+    long_term_readiness: readiness.long_term_readiness?.status || 'unknown',
+    code_context: readiness.code_context || 'unknown',
+    hygiene_status: hygiene.status || 'unknown',
+    backup_noise_count: hygiene.buckets?.backup_noise?.count ?? 0,
+    secret_risk_count: hygiene.buckets?.secret_risk?.count ?? 0,
+    large_asset_count: hygiene.buckets?.large_asset?.count ?? 0,
+    scattered_backup_count: countScatteredBackups(),
+    central_backup_files: countCentralBackups(),
+    git_status_count_before: beforeStatusCount,
+    git_status_count_after: afterStatusCount,
+    readiness,
+    hygiene: {
+      status: hygiene.status || 'unknown',
+      warnings: Array.isArray(hygiene.warnings) ? hygiene.warnings : [],
+      blockers: Array.isArray(hygiene.blockers) ? hygiene.blockers : [],
+    },
+  };
+  result.status = roundStatus(result);
+  roundResults.push(result);
+}
+
+function countWhere(predicate) {
+  return roundResults.filter(predicate).length;
+}
+
+const summary = {
+  rounds,
+  ready_rounds: countWhere((round) => round.status === 'ready'),
+  readiness_ready_rounds: countWhere((round) => round.readiness_status === 'ready'),
+  git_ready_rounds: countWhere((round) => round.git === 'ready'),
+  github_cli_ready_rounds: countWhere((round) => round.github_cli === 'ready'),
+  repository_ready_rounds: countWhere((round) => round.repository_status === 'ready'),
+  long_term_ready_rounds: countWhere((round) => round.long_term_readiness === 'ready'),
+  code_context_ready_rounds: countWhere((round) => round.code_context === 'ready'),
+  backup_noise_rounds: countWhere((round) => round.backup_noise_count > 0),
+  scattered_backup_rounds: countWhere((round) => round.scattered_backup_count > 0),
+  max_git_status_count: Math.max(...roundResults.map((round) => round.git_status_count_after ?? 0)),
+};
+summary.overall_status = summary.ready_rounds === rounds ? 'ready' : 'needs_attention';
+
+const evaluation = {
+  schema: 'gstack-harness.evaluation.v1',
+  generated_at: new Date().toISOString(),
+  started_at: startedAt,
+  target: targetDir,
+  init_mode: initMode,
+  summary,
+  rounds: roundResults,
+};
+
+function md(value) {
+  return value === undefined || value === null || value === '' ? 'unknown' : String(value);
+}
+
+const report = `# Harness Evaluation Report
+
+Generated: ${evaluation.generated_at}
+Target: ${targetDir}
+Rounds: ${rounds}
+Init Mode: ${initMode}
+Overall Status: ${summary.overall_status}
+
+## Scorecard
+
+- Ready Rounds: ${summary.ready_rounds}/${rounds}
+- Readiness Ready Rounds: ${summary.readiness_ready_rounds}/${rounds}
+- Git Ready Rounds: ${summary.git_ready_rounds}/${rounds}
+- GitHub CLI Ready Rounds: ${summary.github_cli_ready_rounds}/${rounds}
+- Repository Ready Rounds: ${summary.repository_ready_rounds}/${rounds}
+- Long-Term Readiness Ready Rounds: ${summary.long_term_ready_rounds}/${rounds}
+- Code Context Ready Rounds: ${summary.code_context_ready_rounds}/${rounds}
+- Backup Noise Rounds: ${summary.backup_noise_rounds}/${rounds}
+- Scattered Backup Rounds: ${summary.scattered_backup_rounds}/${rounds}
+- Max Git Status Count: ${summary.max_git_status_count}
+
+## Round Details
+
+| Round | Readiness | Git | GitHub CLI | Code Context | Backup Noise | Scattered Backups | Status Count |
+|---:|---|---|---|---|---:|---:|---:|
+${roundResults.map((round) => `| ${round.round} | ${md(round.readiness_status)} | ${md(round.git)} | ${md(round.github_cli)} / ${md(round.github_cli_auth)} | ${md(round.code_context)} | ${round.backup_noise_count} | ${round.scattered_backup_count} | ${md(round.git_status_count_after)} |`).join('\n')}
+
+## Decision
+
+${summary.overall_status === 'ready'
+    ? 'The harness is ready for long-term multi-agent takeover under this evaluation profile.'
+    : 'The harness needs attention before long-term multi-agent takeover. Review non-ready rounds and blockers in .gstack/harness-evaluation.json.'}
+`;
+
+const jsonPath = path.join(targetDir, '.gstack', 'harness-evaluation.json');
+const reportPath = path.join(targetDir, 'docs', 'HARNESS_EVALUATION_REPORT.md');
+fs.mkdirSync(path.dirname(jsonPath), { recursive: true });
+fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+fs.writeFileSync(jsonPath, `${JSON.stringify(evaluation, null, 2)}\n`, 'utf8');
+fs.writeFileSync(reportPath, report, 'utf8');
+
+if (printJson) {
+  process.stdout.write(`${JSON.stringify(evaluation, null, 2)}\n`);
+} else {
+  process.stdout.write(`Harness evaluation: ${summary.overall_status}\nReport: docs/HARNESS_EVALUATION_REPORT.md\nJSON: .gstack/harness-evaluation.json\n`);
+}

@@ -242,6 +242,7 @@ test('init renders repeat work promotion state into installed targets', () => {
     },
   });
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-workspace-hygiene')), true);
+  assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-evaluate')), true);
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-atomic-commit')), true);
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-repository-baseline')), true);
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-init')), true);

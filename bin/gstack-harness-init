@@ -1016,6 +1016,7 @@ copy_file "bin/gstack-harness-readiness" ".gstack/harness/bin/gstack-harness-rea
 copy_file "bin/gstack-harness-agent-status" ".gstack/harness/bin/gstack-harness-agent-status"
 copy_file "bin/gstack-harness-schedule" ".gstack/harness/bin/gstack-harness-schedule"
 copy_file "bin/gstack-harness-workspace-hygiene" ".gstack/harness/bin/gstack-harness-workspace-hygiene"
+copy_file "bin/gstack-harness-evaluate" ".gstack/harness/bin/gstack-harness-evaluate"
 copy_file "bin/gstack-harness-atomic-commit" ".gstack/harness/bin/gstack-harness-atomic-commit"
 copy_file "bin/gstack-harness-repository-baseline" ".gstack/harness/bin/gstack-harness-repository-baseline"
 copy_file "scripts/ai-context-bridge.mjs" ".gstack/harness/scripts/ai-context-bridge.mjs"
@@ -1026,7 +1027,7 @@ copy_file "scripts/gstack-scheduler.mjs" "scripts/gstack-scheduler.mjs"
 copy_file "docs/SCHEDULER_MODEL.md" "docs/SCHEDULER_MODEL.md"
 
 if [ "$DRY_RUN" -ne 1 ]; then
-  chmod +x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-init" "$TARGET_DIR/.gstack/harness/bin/pggg" "$TARGET_DIR/.gstack/harness/bin/pcm-harness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-record-run" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-usage-report" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-enable-report-timer" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-schedule" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-workspace-hygiene" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-atomic-commit" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-repository-baseline" "$TARGET_DIR/scripts/ai-context-bridge.mjs" "$TARGET_DIR/scripts/gstack-scheduler.mjs" 2>/dev/null || true
+  chmod +x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-init" "$TARGET_DIR/.gstack/harness/bin/pggg" "$TARGET_DIR/.gstack/harness/bin/pcm-harness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-record-run" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-usage-report" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-enable-report-timer" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-schedule" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-workspace-hygiene" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-evaluate" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-atomic-commit" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-repository-baseline" "$TARGET_DIR/scripts/ai-context-bridge.mjs" "$TARGET_DIR/scripts/gstack-scheduler.mjs" 2>/dev/null || true
 fi
 
 AGENT_TEAM_CONTENT="$(cat <<EOF
