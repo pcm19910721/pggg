@@ -276,6 +276,57 @@ test('readiness includes repository sync status from installed report', () => {
   assert.match(report, /\| repository sync \| push_failed \| push: failed; remote: mismatch; report: docs\/REPOSITORY_SYNC_REPORT.md \|/);
 });
 
+test('readiness includes repository state status from installed report', () => {
+  const project = tempProject();
+  fs.mkdirSync(path.join(project, '.gstack'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.gstack', 'repository-state.json'), JSON.stringify({
+    schema: 'gstack-harness.repository_state.v1',
+    status: 'warning',
+    git: 'ready',
+    repo_root: project,
+    target_dir: project,
+    target_inside_repo: true,
+    target_is_repo_root: true,
+    branch: 'main',
+    head: 'abc123',
+    has_initial_commit: true,
+    dirty: true,
+    staged_files: ['src/app.js'],
+    modified_files: ['README.md'],
+    untracked_files: ['scratch.txt'],
+    baseline_status: 'missing',
+    remote_status: 'missing',
+    warnings: ['remote_missing'],
+    blockers: [],
+    report: 'docs/REPOSITORY_STATE_REPORT.md',
+  }, null, 2));
+
+  const result = spawnSync(readinessBin, [
+    '--target', project,
+    '--mode', 'docs-only',
+    '--skip-code-context',
+    '--json',
+  ], {
+    cwd: root,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      HOME: '/tmp/gstack-readiness-test-home',
+      PATH: testPath,
+    },
+  });
+
+  assert.notEqual(result.status, null, result.stderr || result.stdout);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.repository_state.status, 'warning');
+  assert.equal(output.repository_state.dirty, true);
+  const state = JSON.parse(fs.readFileSync(path.join(project, '.gstack', 'project-state.json'), 'utf8'));
+  assert.equal(state.repository_state.status, 'warning');
+  assert.equal(state.artifacts.repository_state_report, 'docs/REPOSITORY_STATE_REPORT.md');
+  const report = fs.readFileSync(path.join(project, 'docs', 'FOUNDATION_READINESS_REPORT.md'), 'utf8');
+  assert.match(report, /\| repository state \| warning \| git: ready; branch: main; dirty: true; remote: missing; report: docs\/REPOSITORY_STATE_REPORT.md \|/);
+});
+
 test('readiness detects lightweight Python bundle runtime in non-git projects', () => {
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-readiness-python-bundle-'));
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-readiness-home-'));

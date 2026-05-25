@@ -26,6 +26,7 @@
 | 检查基础就位状态 | 判断 gbrain、gstack、项目协议、runtime、runner 是否 ready |
 | 派发基础补齐 | 基础状态 partial/blocked 时交给 Foundation Remediation Agent |
 | 派发问题处理 | warning、timeout、runner failure、反复卡点交给 Problem Handling Agent |
+| 检查 Repository State | Code Context、review、commit、ship 前确认 Git root、HEAD、branch、dirty/staged scope、remote 状态 |
 | 派发工作区卫生检查 | QA/test 后、提交前、大量文件变化时交给 Workspace Hygiene Agent |
 | 维护状态文件 | 更新 `PROJECT_STATE.md` 或 `.gstack/project-state.json` |
 | 判断用户意图 | 先结合同一 session 最近 1-2 次 Codex 输出，再识别“测一下”“继续做”“准备上线”“这个报错了”等意图 |
@@ -51,21 +52,22 @@
 12. 读取 docs/AGENT_ORCHESTRATOR.md
 13. 读取 docs/AGENT_WORKFLOWS.md
 14. 读取 git status 和最近 diff
-15. 检查 .ai-context/project.json / GitNexus status 是否存在和是否适用于本轮任务；UA artifacts 只在 dashboard/onboarding/domain/fallback 时检查
-16. 检查 Workspace Hygiene 状态；提交/ship/review 前必须确认 commit gate
-17. 检查 Repository Sync 状态；可写任务结束前必须跑 `.gstack/harness/bin/gstack-harness-sync-repository --target . --json`
-18. 检查 Foundation Readiness；如果未知、partial 或 blocked，先走 R-1 / R-0.5
-19. 将用户当前输入与同一 session 最近 1-2 次 Codex 输出进行对照
-20. 判断用户输入类型：确认、纠正、补充需求、改变方向、指出缺失上下文、升级信号或普通任务
-21. 检查当前阶段和质量门禁
-22. 解决 gbrain 与本地文档冲突，默认以 gbrain 为准
-23. 新产品、新功能、新 agent、新自动化先按 capability-first workflow 拆能力、查已有模块、判定 reuse/adapt/missing
-24. 选择 workflow recipe 和一个或多个 gstack skills
-25. 生成明确交接任务
-26. gstack skills 执行
-27. 总控 Agent 汇总 artifact/evidence 并更新 PROJECT_STATE.md
-28. 记录 system tuning notes：误路由、能力缺口、交接失败、需要新增或优化的 Agent
-29. 按 GBRAIN_SCHEMA.md 将长期有价值的结论写入 gbrain
+15. 检查 Repository State；缺失或过期时先跑 `.gstack/harness/bin/gstack-harness-repository-state --target . --json`
+16. 检查 .ai-context/project.json / GitNexus status 是否存在和是否适用于本轮任务；UA artifacts 只在 dashboard/onboarding/domain/fallback 时检查
+17. 检查 Workspace Hygiene 状态；提交/ship/review 前必须确认 commit gate
+18. 检查 Repository Sync 状态；可写任务结束前必须跑 `.gstack/harness/bin/gstack-harness-sync-repository --target . --json`
+19. 检查 Foundation Readiness；如果未知、partial 或 blocked，先走 R-1 / R-0.5
+20. 将用户当前输入与同一 session 最近 1-2 次 Codex 输出进行对照
+21. 判断用户输入类型：确认、纠正、补充需求、改变方向、指出缺失上下文、升级信号或普通任务
+22. 检查当前阶段和质量门禁
+23. 解决 gbrain 与本地文档冲突，默认以 gbrain 为准
+24. 新产品、新功能、新 agent、新自动化先按 capability-first workflow 拆能力、查已有模块、判定 reuse/adapt/missing
+25. 选择 workflow recipe 和一个或多个 gstack skills
+26. 生成明确交接任务
+27. gstack skills 执行
+28. 总控 Agent 汇总 artifact/evidence 并更新 PROJECT_STATE.md
+29. 记录 system tuning notes：误路由、能力缺口、交接失败、需要新增或优化的 Agent
+30. 按 GBRAIN_SCHEMA.md 将长期有价值的结论写入 gbrain
 ```
 
 ## 路由规则
@@ -79,6 +81,7 @@
 | “先看懂这个项目/建地图/入口在哪里” | Code Context Agent：R0.5，bridge status；必要时 GitNexus refresh |
 | “这个任务该改哪里/调用链是什么” | Code Context Agent：GitNexus query/context |
 | “这次 diff 影响什么” | Code Context Agent：bridge postchange / GitNexus impact |
+| “git 状态是什么/是不是在正确 repo/dirty scope 是什么” | Repository State Agent：`.gstack/harness/bin/gstack-harness-repository-state --target . --json` |
 | “git status 很乱/文件变多了/QA 后目录变大了” | Workspace Hygiene Agent：扫描、分桶、增长报告、ignore 建议 |
 | “我有个新想法” | 已有代码项目先 Code Context Agent：R0.5；再 Product Agent：`/office-hours` |
 | “做一个新产品/功能/agent/自动化” | Capability-First：C-1，先找已有模块和 recipe，再补缺失能力 |
@@ -115,9 +118,10 @@
 14. 运行中出现 warning/timeout/failure 时，不由 Orchestrator 口头带过；必须派发 Problem Handling Agent 处理、记录或升级。
 15. 已有代码项目在 `/office-hours` 前先确认 Code Context 是否可用；没有 GitNexus 状态或上下文时先跑 R0.5，避免产品判断脱离当前能力和风险。
 16. Build、Review、Incident 类任务必须能说明相关模块、上游、下游、影响面和建议测试；不能说明时先派发 Code Context Agent。
-17. 提交、review、ship 前如果 Workspace Hygiene commit gate 是 blocked，必须先处理或明确记录 skip 风险。
-18. 可写任务结束前如果 Repository Sync Gate 是 `local_only`、`blocked` 或 `push_failed`，不能把 handoff 标为 passed；必须记录 `.gstack/repository-sync.json` 和 `docs/REPOSITORY_SYNC_REPORT.md`。
-19. 产品工作默认按 `docs/CAPABILITY_FIRST_WORKFLOW.md` 执行：没有这些模块时，先找；找不到再定义和实现最小可复用模块。
+17. Code Context、review、commit、ship 前如果 Repository State 是 blocked，必须先处理 Git root、HEAD、detached、baseline 等问题。
+18. 提交、review、ship 前如果 Workspace Hygiene commit gate 是 blocked，必须先处理或明确记录 skip 风险。
+19. 可写任务结束前如果 Repository Sync Gate 是 `local_only`、`blocked` 或 `push_failed`，不能把 handoff 标为 passed；必须记录 `.gstack/repository-sync.json` 和 `docs/REPOSITORY_SYNC_REPORT.md`。
+20. 产品工作默认按 `docs/CAPABILITY_FIRST_WORKFLOW.md` 执行：没有这些模块时，先找；找不到再定义和实现最小可复用模块。
 
 ## 质量门禁建议
 
@@ -125,6 +129,7 @@
 
 ```text
 Foundation Readiness: ready
+Repository State: ready 或 warning；blocked 必须先处理
 Code Context: ready 或明确说明为何跳过；已有代码 diff 需要 GitNexus impact analysis
 Workspace Hygiene: pass 或明确说明为何跳过；staged secret/runtime/profile artifact 必须 blocked
 Repository Sync: synced 或 no_changes；push_failed/local_only 必须记录为 blocker 或 explicit skip

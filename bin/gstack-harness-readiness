@@ -506,6 +506,46 @@ function readRepositorySync(state) {
   };
 }
 
+function readRepositoryState(state) {
+  const reportPath = path.join(target, '.gstack/repository-state.json');
+  const report = readJson(reportPath, null);
+  const previous = state.repository_state || {};
+  return {
+    status: report?.status || previous.status || 'unknown',
+    git: report?.git || previous.git || env.GIT_STATUS,
+    report: report?.report || previous.report || 'docs/REPOSITORY_STATE_REPORT.md',
+    repo_root: report?.repo_root || previous.repo_root || '',
+    target_dir: report?.target_dir || previous.target_dir || target,
+    target_inside_repo: typeof report?.target_inside_repo === 'boolean'
+      ? report.target_inside_repo
+      : Boolean(previous.target_inside_repo),
+    target_is_repo_root: typeof report?.target_is_repo_root === 'boolean'
+      ? report.target_is_repo_root
+      : Boolean(previous.target_is_repo_root),
+    branch: report?.branch || previous.branch || env.BRANCH || '',
+    head: report?.head || previous.head || env.GIT_HEAD || '',
+    has_initial_commit: typeof report?.has_initial_commit === 'boolean'
+      ? report.has_initial_commit
+      : Boolean(previous.has_initial_commit || env.GIT_HEAD),
+    detached_head: typeof report?.detached_head === 'boolean'
+      ? report.detached_head
+      : Boolean(previous.detached_head),
+    dirty: typeof report?.dirty === 'boolean' ? report.dirty : Boolean(previous.dirty),
+    staged_files: Array.isArray(report?.staged_files) ? report.staged_files : (previous.staged_files || []),
+    modified_files: Array.isArray(report?.modified_files) ? report.modified_files : (previous.modified_files || []),
+    untracked_files: Array.isArray(report?.untracked_files) ? report.untracked_files : (previous.untracked_files || []),
+    deleted_files: Array.isArray(report?.deleted_files) ? report.deleted_files : (previous.deleted_files || []),
+    changed_files: Array.isArray(report?.changed_files) ? report.changed_files : (previous.changed_files || []),
+    baseline_status: report?.baseline_status || previous.baseline_status || 'unknown',
+    baseline_path: report?.baseline_path || previous.baseline_path || '.gstack/git-baseline.json',
+    remote_status: report?.remote_status || previous.remote_status || (env.GIT_REMOTE_URL ? 'ready' : 'missing'),
+    remote_url: report?.remote_url || previous.remote_url || env.GIT_REMOTE_URL || '',
+    checked_at: report?.checked_at || previous.checked_at || '',
+    blockers: Array.isArray(report?.blockers) ? report.blockers : (previous.blockers || []),
+    warnings: Array.isArray(report?.warnings) ? report.warnings : (previous.warnings || []),
+  };
+}
+
 function unique(items) {
   return Array.from(new Set(items.filter(Boolean)));
 }
@@ -592,6 +632,7 @@ const longTermReadiness = {
 const codeContextStatus = repositoryNeedsBaseline ? 'blocked_until_git' : readCodeContextStatus(state);
 const workspaceHygiene = readWorkspaceHygiene(state);
 const repositorySync = readRepositorySync(state);
+const repositoryState = readRepositoryState(state);
 let verdict = 'ready';
 if (blockers.length) verdict = 'blocked';
 else if (
@@ -666,6 +707,7 @@ nextState.foundation = {
 };
 nextState.github_cli = githubCli;
 nextState.repository = repository;
+nextState.repository_state = repositoryState;
 nextState.long_term_readiness = longTermReadiness;
 function mergeRuntimeValue(nextValue, previousValue) {
   const hasPrevious = previousValue !== undefined && previousValue !== null && previousValue !== '';
@@ -737,6 +779,11 @@ nextState.artifacts = {
   workspace_hygiene_json: '.gstack/workspace-hygiene.json',
   workspace_hygiene_baseline: '.gstack/workspace-hygiene-baseline.json',
   workspace_hygiene_runner: '.gstack/harness/bin/gstack-harness-workspace-hygiene',
+  repository_state_report: 'docs/REPOSITORY_STATE_REPORT.md',
+  repository_state_json: '.gstack/repository-state.json',
+  repository_state_agent: 'docs/agents/repository-state.json',
+  repository_state_runner: '.gstack/harness/bin/gstack-harness-repository-state',
+  git_baseline: '.gstack/git-baseline.json',
   repository_sync_report: 'docs/REPOSITORY_SYNC_REPORT.md',
   repository_sync_json: '.gstack/repository-sync.json',
   repository_sync_runner: '.gstack/harness/bin/gstack-harness-sync-repository',
@@ -772,6 +819,7 @@ Verdict: ${verdict}
 | project protocol | ready | harness state and reports present |
 | git state | ${env.GIT_STATUS} | branch: ${env.BRANCH} |
 | GitHub CLI | ${githubCli.status} | auth: ${githubCli.auth}; standard remote/CI/PR path: gh CLI |
+| repository state | ${repositoryState.status} | git: ${repositoryState.git}; branch: ${repositoryState.branch || 'none'}; dirty: ${repositoryState.dirty}; remote: ${repositoryState.remote_status}; report: ${repositoryState.report} |
 | repository baseline | ${repository.status} | ${repository.next_action} |
 | repository sync | ${repositorySync.status} | push: ${repositorySync.last_push_status}; remote: ${repositorySync.last_remote_check}; report: ${repositorySync.report} |
 | long-term readiness | ${longTermReadiness.status} | blockers: ${mdList(longTermReadiness.blockers)} |
@@ -840,6 +888,7 @@ const summary = {
   gstack: env.GSTACK_STATUS,
   git: env.GIT_STATUS,
   github_cli: githubCli,
+  repository_state: repositoryState,
   repository,
   long_term_readiness: longTermReadiness,
   runtime: runtime.status,

@@ -245,6 +245,7 @@ test('init renders repeat work promotion state into installed targets', () => {
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-evaluate')), true);
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-atomic-commit')), true);
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-sync-repository')), true);
+  assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-repository-state')), true);
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-repository-baseline')), true);
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-init')), true);
   assert.equal(fs.statSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-init')).mode & 0o111, 0o111);
@@ -336,8 +337,10 @@ test('installed remediation restores missing commit and sync runners', () => {
 
   const atomicRunner = path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-atomic-commit');
   const syncRunner = path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-sync-repository');
+  const stateRunner = path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-repository-state');
   fs.rmSync(atomicRunner);
   fs.rmSync(syncRunner);
+  fs.rmSync(stateRunner);
 
   const remediation = spawnSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-remediate'), [
     '--target', target,
@@ -354,6 +357,8 @@ test('installed remediation restores missing commit and sync runners', () => {
   assert.equal(fs.statSync(atomicRunner).mode & 0o111, 0o111);
   assert.equal(fs.existsSync(syncRunner), true);
   assert.equal(fs.statSync(syncRunner).mode & 0o111, 0o111);
+  assert.equal(fs.existsSync(stateRunner), true);
+  assert.equal(fs.statSync(stateRunner).mode & 0o111, 0o111);
 });
 
 test('installed init can run without the original template source', () => {

@@ -150,6 +150,49 @@ Problem Handling Agent 不直接修业务功能，除非 Maintenance Agent 已�
 Problem Handling Agent 不改 gstack skill 本体。
 ```
 
+## Repository State Agent
+
+Layer: required_core
+
+负责：把目标项目的 Git 事实收口成统一证据，供 Code Context、Review、Commit、Release 使用。
+
+组合：
+
+```text
+读取 git rev-parse --show-toplevel / branch / HEAD
+→ 读取 git status --short --untracked-files=all
+→ 判断 target 是否等于 repo root
+→ 判断 initial commit、detached HEAD、dirty、staged、untracked、remote
+→ 生成 docs/REPOSITORY_STATE_REPORT.md 和 .gstack/repository-state.json
+→ readiness 汇总 repository_state 到 .gstack/project-state.json
+```
+
+产出：
+
+```text
+docs/REPOSITORY_STATE_REPORT.md
+.gstack/repository-state.json
+.gstack/git-baseline.json
+docs/agents/repository-state.json
+```
+
+适用：
+
+```text
+Code Context / GitNexus baseline 前
+review / commit / ship / release 前
+target 可能不是 Git root、没有 initial commit、detached HEAD、dirty scope 不清楚
+```
+
+边界：
+
+```text
+Repository State Agent 不 git init。
+Repository State Agent 不 add、commit、push、stash、reset、rebase 或 force-push。
+Repository State Agent 不分类文件安全性；危险文件交给 Workspace Hygiene Agent。
+Repository State Agent 不同步远端；远端一致性交给 Repository Sync Gate。
+```
+
 ## Workspace Hygiene Agent
 
 Layer: required_core

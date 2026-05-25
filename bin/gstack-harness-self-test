@@ -255,6 +255,7 @@ test_fresh_install() {
     ".gstack/harness/bin/gstack-harness-schedule"
     ".gstack/harness/bin/gstack-harness-workspace-hygiene"
     ".gstack/harness/bin/gstack-harness-atomic-commit"
+    ".gstack/harness/bin/gstack-harness-repository-state"
     ".gstack/harness/bin/gstack-harness-repository-baseline"
     ".ai-context/project.json"
     ".ai-context/FIELD_CONTRACT.md"
@@ -293,6 +294,7 @@ test_fresh_install() {
   assert_contains "$INSTALL_DIR/CLAUDE.md" "<!-- GSTACK_HARNESS_START -->"
   assert_contains "$INSTALL_DIR/CLAUDE.md" "<!-- GSTACK_HARNESS_END -->"
   assert_contains "$INSTALL_DIR/.gstack/harness/agents/TEAM.md" "Problem Handling Agent"
+  assert_contains "$INSTALL_DIR/.gstack/harness/agents/TEAM.md" "Repository State Agent"
   assert_contains "$INSTALL_DIR/.gstack/harness/agents/TEAM.md" "Code Context Agent"
   assert_contains "$INSTALL_DIR/.gstack/harness/agents/problem-handling.md" "gbrain_query_timeout"
   assert_contains "$INSTALL_DIR/docs/CODEX_START_PROMPT.md" ".gstack/harness/agents/TEAM.md"
@@ -886,6 +888,7 @@ main() {
   bash -n "$SCRIPT_DIR/gstack-harness-schedule"
   bash -n "$SCRIPT_DIR/gstack-harness-workspace-hygiene"
   bash -n "$SCRIPT_DIR/gstack-harness-atomic-commit"
+  bash -n "$SCRIPT_DIR/gstack-harness-repository-state"
   bash -n "$SCRIPT_DIR/gstack-harness-repository-baseline"
   node --check "$TEMPLATE_ROOT/scripts/ai-context-bridge.mjs" >/dev/null
   node --check "$TEMPLATE_ROOT/scripts/gstack-scheduler.mjs" >/dev/null

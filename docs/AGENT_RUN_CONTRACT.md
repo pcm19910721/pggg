@@ -54,6 +54,7 @@ PROJECT_STATE.md
 .gstack/project-state.json
 docs/CODE_CONTEXT_REPORT.md
 .ai-context/gitnexus-status.json
+.gstack/repository-state.json
 .gstack/workspace-hygiene.json
 .gstack/repository-sync.json
 .gstack/harness/agents/TEAM.md
@@ -90,6 +91,17 @@ If `.gitnexus/meta.json` itself is stale and graph accuracy matters, run:
 ```bash
 node scripts/ai-context-bridge.mjs refresh
 ```
+
+Before Code Context, review, ship, or commit, record repository state:
+
+```bash
+.gstack/harness/bin/gstack-harness-repository-state --target . --json
+```
+
+If `repository_state.status` is `blocked`, do not continue until the Git root,
+HEAD, detached state, baseline, or status failure is resolved or explicitly
+recorded as a skip risk. `remote_missing` is release-related evidence, not a
+reason by itself to block local code understanding.
 
 Before review, ship, or commit, check workspace hygiene:
 

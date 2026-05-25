@@ -162,10 +162,18 @@ Agent 完成实现、文档、测试、协议或 harness 调整
 .gstack/harness/bin/gstack-harness-atomic-commit
 ```
 
+前置命令：
+
+```bash
+.gstack/harness/bin/gstack-harness-repository-state --target . --json
+```
+
 流程：
 
 ```text
-读取 git status
+记录 repository_state：repo root、branch、HEAD、dirty/staged/untracked、baseline、remote
+→ 如果 repository_state.status=blocked：先处理 Git root / HEAD / detached / status 失败
+→ 读取 git status
 → 按主题分组 docs / tests / harness / protocol / mixed
 → 自动刷新 node scripts/ai-context-bridge.mjs baseline
 → 每次只 stage 一个主题组
@@ -191,6 +199,8 @@ Agent 完成实现、文档、测试、协议或 harness 调整
 .ai-context/change-baseline.json
 .ai-context/runs/<run-id>/run.json
 必要时 docs/WORKSPACE_HYGIENE_REPORT.md 和 .gstack/workspace-hygiene.json
+.gstack/repository-state.json
+docs/REPOSITORY_STATE_REPORT.md
 ```
 
 质量门禁：
@@ -200,6 +210,7 @@ Agent 完成实现、文档、测试、协议或 harness 调整
 不能提交 staged gate blocked 或 needs_review 的主题组。
 不能自动提交 secret/sign-in state/browser profile/runtime artifact。
 不能在风险组停止后继续提交后续组。
+不能在 repository_state blocked 时继续 commit/review/ship。
 ```
 
 ## C-3: Repository Sync Gate

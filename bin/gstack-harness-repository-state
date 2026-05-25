@@ -1,0 +1,338 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+gstack-harness-repository-state - record target project Git repository facts
+
+Usage:
+  gstack-harness-repository-state [--target DIR] [--dry-run] [--json]
+
+This command is read-only with respect to Git history and business code. It does
+not initialize repositories, stage files, commit, push, stash, reset, or edit
+.gitignore. It records current repository facts for later harness gates.
+EOF
+}
+
+TARGET="."
+DRY_RUN=0
+PRINT_JSON=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --target)
+      TARGET="${2:-}"
+      shift 2
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    --json)
+      PRINT_JSON=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "$TARGET" ]; then
+  echo "ERROR: --target requires a directory" >&2
+  exit 2
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "ERROR: node is required for repository state" >&2
+  exit 2
+fi
+
+TARGET_DIR="$(mkdir -p "$TARGET" && cd "$TARGET" && pwd)"
+
+TARGET_DIR="$TARGET_DIR" DRY_RUN="$DRY_RUN" PRINT_JSON="$PRINT_JSON" node <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const { spawnSync } = require('child_process');
+
+const target = process.env.TARGET_DIR;
+const dryRun = process.env.DRY_RUN === '1';
+const printJson = process.env.PRINT_JSON === '1';
+const now = new Date().toISOString();
+
+const paths = {
+  state: path.join(target, '.gstack', 'project-state.json'),
+  json: path.join(target, '.gstack', 'repository-state.json'),
+  baseline: path.join(target, '.gstack', 'git-baseline.json'),
+  report: path.join(target, 'docs', 'REPOSITORY_STATE_REPORT.md'),
+  agent: path.join(target, 'docs', 'agents', 'repository-state.json'),
+};
+
+function run(bin, args, opts = {}) {
+  const result = spawnSync(bin, args, {
+    cwd: opts.cwd || target,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  return {
+    ok: result.status === 0,
+    status: result.status,
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+    error: result.error ? String(result.error.message || result.error) : '',
+  };
+}
+
+function git(args) {
+  return run('git', args);
+}
+
+function gitText(args) {
+  const result = git(args);
+  return result.ok ? result.stdout.trim() : '';
+}
+
+function readJson(file, fallback = {}) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+function relFromTarget(file) {
+  return path.relative(target, file).split(path.sep).join('/');
+}
+
+function parseStatusLine(line) {
+  const raw = String(line || '').trimEnd();
+  if (!raw) return null;
+  const rename = raw.match(/^.. (.+) -> (.+)$/);
+  const filePath = rename ? rename[2] : raw.slice(3).trim();
+  if (!filePath) return null;
+  return { code: raw.slice(0, 2), path: filePath };
+}
+
+function statusFiles() {
+  const result = git(['status', '--short', '--untracked-files=all']);
+  if (!result.ok) return { ok: false, entries: [], error: result.stderr || result.error };
+  return {
+    ok: true,
+    entries: result.stdout.split(/\r?\n/).map(parseStatusLine).filter(Boolean),
+    error: '',
+  };
+}
+
+function classify(entries) {
+  const staged = [];
+  const modified = [];
+  const untracked = [];
+  const deleted = [];
+  for (const entry of entries) {
+    const index = entry.code[0];
+    const worktree = entry.code[1];
+    if (entry.code === '??') {
+      untracked.push(entry.path);
+      continue;
+    }
+    if (index && index !== ' ') staged.push(entry.path);
+    if (worktree && worktree !== ' ') {
+      if (worktree === 'D') deleted.push(entry.path);
+      else modified.push(entry.path);
+    }
+  }
+  return {
+    staged_files: [...new Set(staged)].sort(),
+    modified_files: [...new Set(modified)].sort(),
+    untracked_files: [...new Set(untracked)].sort(),
+    deleted_files: [...new Set(deleted)].sort(),
+    changed_files: [...new Set(entries.map((entry) => entry.path))].sort(),
+  };
+}
+
+function baselineStatus(head) {
+  const baseline = readJson(paths.baseline, null);
+  if (!baseline) return 'missing';
+  if (!head) return 'missing_head';
+  return baseline.head === head ? 'ready' : 'stale';
+}
+
+function remoteStatus() {
+  const url = gitText(['config', '--get', 'remote.origin.url']);
+  if (!url) return { status: 'missing', url: '' };
+  return { status: 'ready', url };
+}
+
+function baseResult() {
+  return {
+    schema: 'gstack-harness.repository_state.v1',
+    status: 'unknown',
+    git: 'unknown',
+    target_dir: target,
+    repo_root: '',
+    target_inside_repo: false,
+    target_is_repo_root: false,
+    branch: '',
+    head: '',
+    has_initial_commit: false,
+    detached_head: false,
+    dirty: false,
+    staged_files: [],
+    modified_files: [],
+    untracked_files: [],
+    deleted_files: [],
+    changed_files: [],
+    baseline_status: 'missing',
+    baseline_path: '.gstack/git-baseline.json',
+    remote_status: 'missing',
+    remote_url: '',
+    report: 'docs/REPOSITORY_STATE_REPORT.md',
+    checked_at: now,
+    warnings: [],
+    blockers: [],
+  };
+}
+
+function markdown(result) {
+  const list = (items) => items.length ? items.map((item) => `- ${item}`).join('\n') : 'None';
+  return `# Repository State Report
+
+Generated: ${result.checked_at}
+Target: ${result.target_dir}
+Status: ${result.status}
+
+## Git Facts
+
+| Field | Value |
+|---|---|
+| git | ${result.git} |
+| repo root | ${result.repo_root || 'none'} |
+| target is repo root | ${result.target_is_repo_root} |
+| branch | ${result.branch || 'none'} |
+| head | ${result.head || 'none'} |
+| has initial commit | ${result.has_initial_commit} |
+| detached HEAD | ${result.detached_head} |
+| dirty | ${result.dirty} |
+| baseline | ${result.baseline_status} |
+| remote | ${result.remote_status} |
+
+## Staged Files
+
+${list(result.staged_files)}
+
+## Modified Files
+
+${list(result.modified_files)}
+
+## Untracked Files
+
+${list(result.untracked_files)}
+
+## Blockers
+
+${list(result.blockers)}
+
+## Warnings
+
+${list(result.warnings)}
+`;
+}
+
+function updateProjectState(result) {
+  const state = readJson(paths.state, {});
+  const next = {
+    ...state,
+    repository_state: result,
+    artifacts: {
+      ...(state.artifacts || {}),
+      repository_state_report: 'docs/REPOSITORY_STATE_REPORT.md',
+      repository_state_json: '.gstack/repository-state.json',
+      repository_state_agent: 'docs/agents/repository-state.json',
+      repository_state_runner: '.gstack/harness/bin/gstack-harness-repository-state',
+      git_baseline: '.gstack/git-baseline.json',
+    },
+  };
+  writeJson(paths.state, next);
+}
+
+function writeOutputs(result) {
+  if (dryRun) return;
+  writeJson(paths.json, result);
+  writeJson(paths.agent, {
+    schema: 'gstack-harness.agent_status.v1',
+    name: 'Repository State Agent',
+    status: result.status,
+    evidence: {
+      report: result.report,
+      json: '.gstack/repository-state.json',
+      baseline: result.baseline_path,
+    },
+    blockers: result.blockers,
+    warnings: result.warnings,
+    checked_at: result.checked_at,
+  });
+  fs.mkdirSync(path.dirname(paths.report), { recursive: true });
+  fs.writeFileSync(paths.report, markdown(result), 'utf8');
+  updateProjectState(result);
+}
+
+const result = baseResult();
+const rootResult = git(['rev-parse', '--show-toplevel']);
+if (!rootResult.ok) {
+  result.status = 'partial';
+  result.git = 'missing';
+  result.blockers.push('not_git_repo');
+  writeOutputs(result);
+  if (printJson) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  else process.stdout.write(`repository state: ${result.status}\n`);
+  process.exit(0);
+}
+
+result.git = 'ready';
+result.repo_root = rootResult.stdout.trim();
+result.target_inside_repo = target === result.repo_root || target.startsWith(`${result.repo_root}${path.sep}`);
+result.target_is_repo_root = target === result.repo_root;
+if (!result.target_is_repo_root) result.warnings.push('git_repo_root_mismatch');
+
+result.head = gitText(['rev-parse', 'HEAD']);
+result.has_initial_commit = Boolean(result.head);
+if (!result.has_initial_commit) result.blockers.push('no_initial_commit');
+
+result.branch = gitText(['branch', '--show-current']);
+result.detached_head = !result.branch && result.has_initial_commit;
+if (result.detached_head) result.blockers.push('detached_head');
+
+const status = statusFiles();
+if (!status.ok) {
+  result.blockers.push('git_status_failed');
+} else {
+  Object.assign(result, classify(status.entries));
+}
+result.dirty = result.changed_files.length > 0;
+
+const remote = remoteStatus();
+result.remote_status = remote.status;
+result.remote_url = remote.url;
+if (remote.status === 'missing') result.warnings.push('remote_missing');
+result.baseline_status = baselineStatus(result.head);
+
+const stateWarnings = result.warnings.filter((warning) => warning !== 'remote_missing');
+if (result.blockers.length) result.status = 'blocked';
+else if (stateWarnings.length) result.status = 'warning';
+else result.status = 'ready';
+
+writeOutputs(result);
+if (printJson) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+else process.stdout.write(`repository state: ${result.status}\n`);
+NODE

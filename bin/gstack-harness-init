@@ -1019,6 +1019,7 @@ copy_file "bin/gstack-harness-workspace-hygiene" ".gstack/harness/bin/gstack-har
 copy_file "bin/gstack-harness-evaluate" ".gstack/harness/bin/gstack-harness-evaluate"
 copy_file "bin/gstack-harness-atomic-commit" ".gstack/harness/bin/gstack-harness-atomic-commit"
 copy_file "bin/gstack-harness-sync-repository" ".gstack/harness/bin/gstack-harness-sync-repository"
+copy_file "bin/gstack-harness-repository-state" ".gstack/harness/bin/gstack-harness-repository-state"
 copy_file "bin/gstack-harness-repository-baseline" ".gstack/harness/bin/gstack-harness-repository-baseline"
 copy_file "scripts/ai-context-bridge.mjs" ".gstack/harness/scripts/ai-context-bridge.mjs"
 copy_file "scripts/gstack-scheduler.mjs" ".gstack/harness/scripts/gstack-scheduler.mjs"
@@ -1028,7 +1029,7 @@ copy_file "scripts/gstack-scheduler.mjs" "scripts/gstack-scheduler.mjs"
 copy_file "docs/SCHEDULER_MODEL.md" "docs/SCHEDULER_MODEL.md"
 
 if [ "$DRY_RUN" -ne 1 ]; then
-  chmod +x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-init" "$TARGET_DIR/.gstack/harness/bin/pggg" "$TARGET_DIR/.gstack/harness/bin/pcm-harness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-record-run" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-usage-report" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-enable-report-timer" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-schedule" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-workspace-hygiene" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-evaluate" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-atomic-commit" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-sync-repository" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-repository-baseline" "$TARGET_DIR/scripts/ai-context-bridge.mjs" "$TARGET_DIR/scripts/gstack-scheduler.mjs" 2>/dev/null || true
+  chmod +x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-init" "$TARGET_DIR/.gstack/harness/bin/pggg" "$TARGET_DIR/.gstack/harness/bin/pcm-harness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-record-run" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-usage-report" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-enable-report-timer" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-remediate" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-agent-status" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-schedule" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-workspace-hygiene" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-evaluate" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-atomic-commit" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-sync-repository" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-repository-state" "$TARGET_DIR/.gstack/harness/bin/gstack-harness-repository-baseline" "$TARGET_DIR/scripts/ai-context-bridge.mjs" "$TARGET_DIR/scripts/gstack-scheduler.mjs" 2>/dev/null || true
 fi
 
 AGENT_TEAM_CONTENT="$(cat <<EOF
@@ -1051,6 +1052,7 @@ These agents are always present and cannot be removed by project overrides.
 | Problem Handling Agent | Handles warnings, timeouts, runner failures, repeated friction, and unclear blockers. | Any runtime issue |
 | Memory / GBrain Agent | Owns durable memory reads/writes, conflict policy, and gbrain schema discipline. | Memory read/write/conflict |
 | System Tuning Agent | Converts repeated failures into harness/agent/workflow improvements. | Recurring issue or capability gap |
+| Repository State Agent | Owns Git repository facts, repo root, branch, HEAD, dirty/staged scope, baseline status, and remote readiness evidence. | Before Code Context, review, commit, ship, or release |
 | Workspace Hygiene Agent | Classifies generated artifacts, workspace growth, .gitignore recommendations, and dangerous commit gates. | QA/test aftermath, large dirty worktree, commit/release preflight |
 
 ## Default Capability Agents
@@ -1953,6 +1955,11 @@ PROJECT_STATE_JSON="$(cat <<EOF
     "workspace_hygiene_json": ".gstack/workspace-hygiene.json",
     "workspace_hygiene_baseline": ".gstack/workspace-hygiene-baseline.json",
     "workspace_hygiene_runner": ".gstack/harness/bin/gstack-harness-workspace-hygiene",
+    "repository_state_report": "docs/REPOSITORY_STATE_REPORT.md",
+    "repository_state_json": ".gstack/repository-state.json",
+    "repository_state_agent": "docs/agents/repository-state.json",
+    "repository_state_runner": ".gstack/harness/bin/gstack-harness-repository-state",
+    "git_baseline": ".gstack/git-baseline.json",
     "repository_baseline_report": "docs/REPOSITORY_BASELINE_REPORT.md",
     "repository_baseline_json": ".gstack/repository-baseline.json",
     "repository_baseline_runner": ".gstack/harness/bin/gstack-harness-repository-baseline",
