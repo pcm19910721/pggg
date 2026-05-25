@@ -482,6 +482,30 @@ function readWorkspaceHygiene(state) {
   };
 }
 
+function readRepositorySync(state) {
+  const reportPath = path.join(target, '.gstack/repository-sync.json');
+  const report = readJson(reportPath, null);
+  const previous = state.repository_sync || {};
+  return {
+    status: report?.status || previous.status || 'unknown',
+    report: report?.report || previous.report || 'docs/REPOSITORY_SYNC_REPORT.md',
+    branch: report?.branch || previous.branch || env.BRANCH || '',
+    head: report?.head || previous.head || env.GIT_HEAD || '',
+    origin_head: report?.origin_head || previous.origin_head || '',
+    dirty: typeof report?.dirty === 'boolean' ? report.dirty : Boolean(previous.dirty),
+    staged_files: Array.isArray(report?.staged_files) ? report.staged_files : (previous.staged_files || []),
+    untracked_files: Array.isArray(report?.untracked_files) ? report.untracked_files : (previous.untracked_files || []),
+    unpushed_commits: Number(report?.unpushed_commits ?? previous.unpushed_commits ?? 0),
+    last_commit_status: report?.last_commit_status || previous.last_commit_status || 'unknown',
+    last_push_status: report?.last_push_status || previous.last_push_status || 'unknown',
+    last_remote_check: report?.last_remote_check || previous.last_remote_check || 'unknown',
+    last_ci_status: report?.last_ci_status || previous.last_ci_status || 'unknown',
+    checked_at: report?.checked_at || previous.checked_at || '',
+    blockers: Array.isArray(report?.blockers) ? report.blockers : (previous.blockers || []),
+    warnings: Array.isArray(report?.warnings) ? report.warnings : (previous.warnings || []),
+  };
+}
+
 function unique(items) {
   return Array.from(new Set(items.filter(Boolean)));
 }
@@ -567,6 +591,7 @@ const longTermReadiness = {
 };
 const codeContextStatus = repositoryNeedsBaseline ? 'blocked_until_git' : readCodeContextStatus(state);
 const workspaceHygiene = readWorkspaceHygiene(state);
+const repositorySync = readRepositorySync(state);
 let verdict = 'ready';
 if (blockers.length) verdict = 'blocked';
 else if (
@@ -694,6 +719,7 @@ nextState.quality_gates = {
   deployment: deploymentGate,
 };
 nextState.workspace_hygiene = workspaceHygiene;
+nextState.repository_sync = repositorySync;
 nextState.artifacts = {
   ...(state.artifacts || {}),
   foundation_readiness_report: 'docs/FOUNDATION_READINESS_REPORT.md',
@@ -711,6 +737,9 @@ nextState.artifacts = {
   workspace_hygiene_json: '.gstack/workspace-hygiene.json',
   workspace_hygiene_baseline: '.gstack/workspace-hygiene-baseline.json',
   workspace_hygiene_runner: '.gstack/harness/bin/gstack-harness-workspace-hygiene',
+  repository_sync_report: 'docs/REPOSITORY_SYNC_REPORT.md',
+  repository_sync_json: '.gstack/repository-sync.json',
+  repository_sync_runner: '.gstack/harness/bin/gstack-harness-sync-repository',
 };
 nextState.blockers = unique([...blockers]);
 nextState.warnings = unique([
@@ -744,6 +773,7 @@ Verdict: ${verdict}
 | git state | ${env.GIT_STATUS} | branch: ${env.BRANCH} |
 | GitHub CLI | ${githubCli.status} | auth: ${githubCli.auth}; standard remote/CI/PR path: gh CLI |
 | repository baseline | ${repository.status} | ${repository.next_action} |
+| repository sync | ${repositorySync.status} | push: ${repositorySync.last_push_status}; remote: ${repositorySync.last_remote_check}; report: ${repositorySync.report} |
 | long-term readiness | ${longTermReadiness.status} | blockers: ${mdList(longTermReadiness.blockers)} |
 | runtime | ${runtime.status} | mode: ${mode}; test: ${runtime.test || ''}; dev: ${runtime.dev || ''} |
 | code context | ${codeContextStatus} | docs/CODE_CONTEXT_REPORT.md / .ai-context/gitnexus-status.json |
@@ -815,6 +845,7 @@ const summary = {
   runtime: runtime.status,
   code_context: codeContextStatus,
   workspace_hygiene: workspaceHygiene,
+  repository_sync: repositorySync,
   blockers: nextState.blockers,
   warnings: nextState.warnings,
   next_recommended_agent: nextAgent,

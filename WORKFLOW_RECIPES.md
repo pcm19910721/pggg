@@ -181,6 +181,7 @@ Agent 完成实现、文档、测试、协议或 harness 调整
 ```bash
 .gstack/harness/bin/gstack-harness-atomic-commit --dry-run
 .gstack/harness/bin/gstack-harness-atomic-commit --no-commit
+.gstack/harness/bin/gstack-harness-atomic-commit --script-only --push
 ```
 
 产物：
@@ -199,6 +200,81 @@ Agent 完成实现、文档、测试、协议或 harness 调整
 不能提交 staged gate blocked 或 needs_review 的主题组。
 不能自动提交 secret/sign-in state/browser profile/runtime artifact。
 不能在风险组停止后继续提交后续组。
+```
+
+## C-3: Repository Sync Gate
+
+适用：
+
+```text
+Agent 完成目标项目里的实现、脚本、测试、协议或文档变更
+需要确认本地 Git 与 origin 当前分支一致
+需要把“已完成”从本地状态升级为远端可见状态
+```
+
+核心原则：
+
+```text
+任务完成不等于文件写完。
+成功任务结束时，本地状态必须是 synced、no_changes、blocked、push_failed 或 local_only 之一。
+不能让有效代码长期只停在本地。
+不能把 push 失败伪装成完成。
+```
+
+默认命令：
+
+```bash
+.gstack/harness/bin/gstack-harness-sync-repository --target . --json
+```
+
+脚本包 / market agent 场景：
+
+```bash
+.gstack/harness/bin/gstack-harness-sync-repository --target . --script-only --json
+```
+
+流程：
+
+```text
+读取 git 状态、branch、HEAD、origin
+→ 如果不是 git repo / detached HEAD / missing HEAD：blocked
+→ 如果没有 origin 且需要 push：local_only
+→ 如果有 eligible dirty files：调用 atomic commit gate
+→ 如果已有本地未推 commit：push origin HEAD:<branch>
+→ fetch origin <branch>
+→ 对比 HEAD == origin/<branch>
+→ 写 .gstack/repository-sync.json
+→ 如果不会破坏 Git clean 状态，更新 .gstack/project-state.json.repository_sync
+→ readiness 从 .gstack/repository-sync.json 汇总展示 repository_sync
+→ 写 docs/REPOSITORY_SYNC_REPORT.md
+```
+
+产物：
+
+```text
+.gstack/repository-sync.json
+docs/REPOSITORY_SYNC_REPORT.md
+.gstack/project-state.json.repository_sync（由 sync gate 或 readiness 汇总）
+```
+
+质量门禁：
+
+```text
+不能 force push。
+不能 rebase。
+不能自动创建 remote。
+不能 git add -A。
+不能提交 workspace hygiene blocked 的 staged files。
+不能在 push_failed 时把 handoff 标为 passed。
+不能为了写 repository_sync 状态在同步成功后重新弄脏 Git 工作区。
+如果 CI 查询失败，Git sync 可以是 synced，但 CI 必须记录 unknown/warning。
+```
+
+handoff 规则：
+
+```text
+passed 只能接受 repository_sync.status 为 synced 或 no_changes。
+local_only、blocked、push_failed 必须作为 partial/blocked/fallback 证据写入 handoff。
 ```
 
 ## Harness Init Preflow

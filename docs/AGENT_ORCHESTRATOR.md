@@ -53,18 +53,19 @@
 14. 读取 git status 和最近 diff
 15. 检查 .ai-context/project.json / GitNexus status 是否存在和是否适用于本轮任务；UA artifacts 只在 dashboard/onboarding/domain/fallback 时检查
 16. 检查 Workspace Hygiene 状态；提交/ship/review 前必须确认 commit gate
-17. 检查 Foundation Readiness；如果未知、partial 或 blocked，先走 R-1 / R-0.5
-18. 将用户当前输入与同一 session 最近 1-2 次 Codex 输出进行对照
-19. 判断用户输入类型：确认、纠正、补充需求、改变方向、指出缺失上下文、升级信号或普通任务
-20. 检查当前阶段和质量门禁
-21. 解决 gbrain 与本地文档冲突，默认以 gbrain 为准
-22. 新产品、新功能、新 agent、新自动化先按 capability-first workflow 拆能力、查已有模块、判定 reuse/adapt/missing
-23. 选择 workflow recipe 和一个或多个 gstack skills
-24. 生成明确交接任务
-25. gstack skills 执行
-26. 总控 Agent 汇总 artifact/evidence 并更新 PROJECT_STATE.md
-27. 记录 system tuning notes：误路由、能力缺口、交接失败、需要新增或优化的 Agent
-28. 按 GBRAIN_SCHEMA.md 将长期有价值的结论写入 gbrain
+17. 检查 Repository Sync 状态；可写任务结束前必须跑 `.gstack/harness/bin/gstack-harness-sync-repository --target . --json`
+18. 检查 Foundation Readiness；如果未知、partial 或 blocked，先走 R-1 / R-0.5
+19. 将用户当前输入与同一 session 最近 1-2 次 Codex 输出进行对照
+20. 判断用户输入类型：确认、纠正、补充需求、改变方向、指出缺失上下文、升级信号或普通任务
+21. 检查当前阶段和质量门禁
+22. 解决 gbrain 与本地文档冲突，默认以 gbrain 为准
+23. 新产品、新功能、新 agent、新自动化先按 capability-first workflow 拆能力、查已有模块、判定 reuse/adapt/missing
+24. 选择 workflow recipe 和一个或多个 gstack skills
+25. 生成明确交接任务
+26. gstack skills 执行
+27. 总控 Agent 汇总 artifact/evidence 并更新 PROJECT_STATE.md
+28. 记录 system tuning notes：误路由、能力缺口、交接失败、需要新增或优化的 Agent
+29. 按 GBRAIN_SCHEMA.md 将长期有价值的结论写入 gbrain
 ```
 
 ## 路由规则
@@ -115,7 +116,8 @@
 15. 已有代码项目在 `/office-hours` 前先确认 Code Context 是否可用；没有 GitNexus 状态或上下文时先跑 R0.5，避免产品判断脱离当前能力和风险。
 16. Build、Review、Incident 类任务必须能说明相关模块、上游、下游、影响面和建议测试；不能说明时先派发 Code Context Agent。
 17. 提交、review、ship 前如果 Workspace Hygiene commit gate 是 blocked，必须先处理或明确记录 skip 风险。
-18. 产品工作默认按 `docs/CAPABILITY_FIRST_WORKFLOW.md` 执行：没有这些模块时，先找；找不到再定义和实现最小可复用模块。
+18. 可写任务结束前如果 Repository Sync Gate 是 `local_only`、`blocked` 或 `push_failed`，不能把 handoff 标为 passed；必须记录 `.gstack/repository-sync.json` 和 `docs/REPOSITORY_SYNC_REPORT.md`。
+19. 产品工作默认按 `docs/CAPABILITY_FIRST_WORKFLOW.md` 执行：没有这些模块时，先找；找不到再定义和实现最小可复用模块。
 
 ## 质量门禁建议
 
@@ -125,6 +127,7 @@
 Foundation Readiness: ready
 Code Context: ready 或明确说明为何跳过；已有代码 diff 需要 GitNexus impact analysis
 Workspace Hygiene: pass 或明确说明为何跳过；staged secret/runtime/profile artifact 必须 blocked
+Repository Sync: synced 或 no_changes；push_failed/local_only 必须记录为 blocker 或 explicit skip
 Health: passing
 Browser QA: passing 或明确说明为何跳过
 Review: passing

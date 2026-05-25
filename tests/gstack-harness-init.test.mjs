@@ -244,6 +244,7 @@ test('init renders repeat work promotion state into installed targets', () => {
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-workspace-hygiene')), true);
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-evaluate')), true);
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-atomic-commit')), true);
+  assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-sync-repository')), true);
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-repository-baseline')), true);
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-init')), true);
   assert.equal(fs.statSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-init')).mode & 0o111, 0o111);
@@ -312,8 +313,8 @@ test('init preserves existing repeat work promotion state on reinstall', () => {
   assert.deepEqual(updated.repeat_work, existing.repeat_work);
 });
 
-test('installed remediation restores missing atomic commit runner', () => {
-  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-init-remediate-atomic-'));
+test('installed remediation restores missing commit and sync runners', () => {
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-init-remediate-sync-'));
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-init-home-'));
   const env = {
     ...process.env,
@@ -334,7 +335,9 @@ test('installed remediation restores missing atomic commit runner', () => {
   assert.notEqual(installed.status, null, installed.stderr || installed.stdout);
 
   const atomicRunner = path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-atomic-commit');
+  const syncRunner = path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-sync-repository');
   fs.rmSync(atomicRunner);
+  fs.rmSync(syncRunner);
 
   const remediation = spawnSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-remediate'), [
     '--target', target,
@@ -349,6 +352,8 @@ test('installed remediation restores missing atomic commit runner', () => {
   assert.equal(remediation.status, 0, remediation.stderr || remediation.stdout);
   assert.equal(fs.existsSync(atomicRunner), true);
   assert.equal(fs.statSync(atomicRunner).mode & 0o111, 0o111);
+  assert.equal(fs.existsSync(syncRunner), true);
+  assert.equal(fs.statSync(syncRunner).mode & 0o111, 0o111);
 });
 
 test('installed init can run without the original template source', () => {

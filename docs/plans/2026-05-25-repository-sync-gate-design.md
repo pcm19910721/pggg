@@ -48,7 +48,8 @@ Repository Sync Gate owns:
 - running the existing staged commit gates before commit;
 - pushing successful commits;
 - confirming `HEAD == origin/<branch>` after push or fetch;
-- recording blockers and last sync status in `.gstack/project-state.json`;
+- recording blockers and last sync status in `.gstack/repository-sync.json`;
+- allowing readiness to summarize repository sync state into `.gstack/project-state.json`;
 - producing machine-readable and human-readable evidence.
 
 It does not own:
@@ -122,7 +123,8 @@ read repository state
 -> push to origin current branch
 -> fetch/confirm origin/<branch>
 -> query GitHub Actions when gh is authenticated
--> update repository_sync state
+-> write .gstack/repository-sync.json
+-> update repository_sync state only when it does not dirty the synced repository
 ```
 
 If there are no eligible files but the branch has unpushed commits, the gate should push and confirm the existing commits.
@@ -201,7 +203,7 @@ The command should:
 - wrap existing `gstack-harness-atomic-commit`;
 - support `--script-only`, `--no-push`, `--dry-run`, and `--json`;
 - write `.gstack/repository-sync.json`;
-- update `.gstack/project-state.json`;
+- update `.gstack/project-state.json` when doing so does not break the clean Git state, otherwise let readiness merge the local sync evidence;
 - write `docs/REPOSITORY_SYNC_REPORT.md` when not in JSON-only mode.
 
 Readiness should display:
@@ -221,6 +223,7 @@ Workflow recipes should require the sync gate before an agent task is marked com
 - Never commit blocked workspace hygiene files.
 - Never treat a push failure as task completion.
 - Never hide excluded files. Report them with reasons.
+- Never make a successfully synced repository dirty just to record sync evidence.
 
 ## Success Criteria
 

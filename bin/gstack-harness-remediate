@@ -246,6 +246,7 @@ copy_from_template_if_missing "bin/gstack-harness-init" ".gstack/harness/bin/gst
 copy_from_template_if_missing "bin/gstack-harness-record-run" ".gstack/harness/bin/gstack-harness-record-run"
 copy_from_template_if_missing "bin/gstack-harness-readiness" ".gstack/harness/bin/gstack-harness-readiness"
 copy_from_template_if_missing "bin/gstack-harness-atomic-commit" ".gstack/harness/bin/gstack-harness-atomic-commit"
+copy_from_template_if_missing "bin/gstack-harness-sync-repository" ".gstack/harness/bin/gstack-harness-sync-repository"
 copy_from_template_if_missing_any ".gstack/harness/bin/gstack-harness-agent-status" "bin/gstack-harness-agent-status" ".gstack/harness/bin/gstack-harness-agent-status"
 
 write_if_missing ".gstack/usage-runs/README.md" "# Usage Runs

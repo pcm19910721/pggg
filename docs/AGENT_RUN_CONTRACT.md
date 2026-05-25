@@ -55,6 +55,7 @@ PROJECT_STATE.md
 docs/CODE_CONTEXT_REPORT.md
 .ai-context/gitnexus-status.json
 .gstack/workspace-hygiene.json
+.gstack/repository-sync.json
 .gstack/harness/agents/TEAM.md
 GSTACK_SKILL_REGISTRY.md
 WORKFLOW_RECIPES.md
@@ -100,6 +101,26 @@ If the gate is `blocked`, do not continue with commit/release until the staged
 secret, browser profile, runtime artifact, or harness-owned local artifact is
 removed from the staged set or the skip risk is explicitly recorded.
 
+Before marking a writable task as `passed`, run the repository sync gate:
+
+```bash
+.gstack/harness/bin/gstack-harness-sync-repository --target . --json
+```
+
+For script-only bundle publication, use:
+
+```bash
+.gstack/harness/bin/gstack-harness-sync-repository --target . --script-only --json
+```
+
+`passed` requires `repository_sync.status` to be `synced` or `no_changes`.
+`local_only`, `blocked`, or `push_failed` must be recorded as `partial`,
+`blocked`, or `fallback` with `.gstack/repository-sync.json` and
+`docs/REPOSITORY_SYNC_REPORT.md` named as evidence.
+The sync gate must not dirty a clean repository just to update tracked local
+state; readiness may merge `.gstack/repository-sync.json` into project state on
+the next readiness pass.
+
 ### 2. Dispatch
 
 The Orchestrator selects exactly one primary agent and may attach supporting agents.
@@ -141,6 +162,8 @@ browser screenshots
 docs/WORKSPACE_HYGIENE_REPORT.md
 .gstack/workspace-hygiene.json
 .gstack/workspace-hygiene-baseline.json
+docs/REPOSITORY_SYNC_REPORT.md
+.gstack/repository-sync.json
 review findings
 deployment/canary logs
 repeated preference evidence
@@ -183,6 +206,21 @@ gate:
   checked_at:
   commit:
   skip_reason:
+```
+
+Repository sync gate updates must include:
+
+```yaml
+repository_sync:
+  status:
+  branch:
+  head:
+  origin_head:
+  unpushed_commits:
+  last_push_status:
+  last_remote_check:
+  artifact: .gstack/repository-sync.json
+  report: docs/REPOSITORY_SYNC_REPORT.md
 ```
 
 ### 6. Memory

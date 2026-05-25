@@ -1,0 +1,463 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+gstack-harness-sync-repository - commit and push verified target project changes
+
+Usage:
+  gstack-harness-sync-repository [--target DIR] [--dry-run] [--json] [--script-only] [--no-push]
+
+Default behavior commits eligible changes through the atomic commit gate, pushes
+to origin on the current branch, confirms local HEAD matches origin/<branch>,
+and records repository_sync state.
+EOF
+}
+
+TARGET="."
+DRY_RUN=0
+PRINT_JSON=0
+SCRIPT_ONLY=0
+NO_PUSH=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --target)
+      TARGET="${2:-}"
+      shift 2
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    --json)
+      PRINT_JSON=1
+      shift
+      ;;
+    --script-only)
+      SCRIPT_ONLY=1
+      shift
+      ;;
+    --no-push)
+      NO_PUSH=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "$TARGET" ]; then
+  echo "ERROR: --target requires a directory" >&2
+  exit 2
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "ERROR: node is required for repository sync" >&2
+  exit 2
+fi
+
+TARGET_DIR="$(mkdir -p "$TARGET" && cd "$TARGET" && pwd)"
+SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+TARGET_DIR="$TARGET_DIR" SCRIPT_PATH="$SCRIPT_PATH" DRY_RUN="$DRY_RUN" PRINT_JSON="$PRINT_JSON" SCRIPT_ONLY="$SCRIPT_ONLY" NO_PUSH="$NO_PUSH" node <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const { spawnSync } = require('child_process');
+
+const target = process.env.TARGET_DIR;
+const scriptPath = process.env.SCRIPT_PATH;
+const dryRun = process.env.DRY_RUN === '1';
+const printJson = process.env.PRINT_JSON === '1';
+const scriptOnly = process.env.SCRIPT_ONLY === '1';
+const noPush = process.env.NO_PUSH === '1';
+const now = new Date().toISOString();
+
+const paths = {
+  state: path.join(target, '.gstack', 'project-state.json'),
+  json: path.join(target, '.gstack', 'repository-sync.json'),
+  report: path.join(target, 'docs', 'REPOSITORY_SYNC_REPORT.md'),
+};
+
+function run(bin, args, opts = {}) {
+  const result = spawnSync(bin, args, {
+    cwd: opts.cwd || target,
+    encoding: 'utf8',
+    env: opts.env || process.env,
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  return {
+    ok: result.status === 0,
+    status: result.status,
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+    error: result.error ? String(result.error.message || result.error) : '',
+  };
+}
+
+function readJson(file, fallback = {}) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+function git(args, opts = {}) {
+  return run('git', args, opts);
+}
+
+function gitText(args) {
+  const result = git(args);
+  return result.ok ? result.stdout.trim() : '';
+}
+
+function rel(file) {
+  return path.relative(target, file).split(path.sep).join('/');
+}
+
+function isTracked(file) {
+  const relative = rel(file);
+  if (!relative || relative.startsWith('..')) return false;
+  return git(['ls-files', '--error-unmatch', '--', relative]).ok;
+}
+
+function ensureInfoExclude(pattern) {
+  const gitDir = gitText(['rev-parse', '--git-dir']);
+  if (!gitDir) return;
+  const excludePath = path.isAbsolute(gitDir)
+    ? path.join(gitDir, 'info', 'exclude')
+    : path.join(target, gitDir, 'info', 'exclude');
+  fs.mkdirSync(path.dirname(excludePath), { recursive: true });
+  let content = '';
+  try {
+    content = fs.readFileSync(excludePath, 'utf8');
+  } catch {
+    content = '';
+  }
+  const lines = new Set(content.split(/\r?\n/).filter(Boolean));
+  if (lines.has(pattern)) return;
+  fs.appendFileSync(excludePath, `${content && !content.endsWith('\n') ? '\n' : ''}${pattern}\n`, 'utf8');
+}
+
+function ensureLocalStateExcludes() {
+  ensureInfoExclude('.gstack/repository-sync.json');
+  ensureInfoExclude('docs/REPOSITORY_SYNC_REPORT.md');
+}
+
+function parseStatusLine(line) {
+  const raw = String(line || '').trimEnd();
+  if (!raw) return null;
+  const rename = raw.match(/^.. (.+) -> (.+)$/);
+  const filePath = rename ? rename[2] : raw.slice(3).trim();
+  if (!filePath) return null;
+  return { code: raw.slice(0, 2), path: filePath };
+}
+
+function changedFiles() {
+  const status = git(['status', '--short', '--untracked-files=all']);
+  if (!status.ok) return [];
+  return status.stdout.split(/\r?\n/).map(parseStatusLine).filter(Boolean);
+}
+
+function currentStateBase() {
+  return {
+    schema: 'gstack-harness.repository_sync.v1',
+    status: 'unknown',
+    target,
+    branch: '',
+    head: '',
+    origin_head: '',
+    dirty: false,
+    staged_files: [],
+    untracked_files: [],
+    changed_files: [],
+    excluded_files: [],
+    unpushed_commits: 0,
+    last_commit_status: 'none',
+    last_push_status: 'none',
+    last_remote_check: 'not_checked',
+    last_ci_status: 'unknown',
+    checked_at: now,
+    report: 'docs/REPOSITORY_SYNC_REPORT.md',
+    blockers: [],
+    warnings: [],
+    events: [],
+  };
+}
+
+function commitSummaryFromAtomic(stdout) {
+  try {
+    return JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+}
+
+function atomicPath() {
+  const candidates = [
+    path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-atomic-commit'),
+    path.join(target, 'bin', 'gstack-harness-atomic-commit'),
+    path.join(path.dirname(scriptPath), 'gstack-harness-atomic-commit'),
+    path.join(path.dirname(path.dirname(scriptPath)), 'bin', 'gstack-harness-atomic-commit'),
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+}
+
+function githubSsh443Remote(remoteUrl) {
+  const sshMatch = String(remoteUrl || '').match(/^git@github\.com:(.+)$/);
+  if (sshMatch) return `ssh://git@ssh.github.com:443/${sshMatch[1]}`;
+  const sshUrlMatch = String(remoteUrl || '').match(/^ssh:\/\/git@github\.com\/(.+)$/);
+  if (sshUrlMatch) return `ssh://git@ssh.github.com:443/${sshUrlMatch[1]}`;
+  return '';
+}
+
+function pushCurrent(branch, remoteUrl, events) {
+  const first = git(['push', 'origin', `HEAD:${branch}`]);
+  events.push({ type: 'push', remote: 'origin', branch, status: first.status, ok: first.ok });
+  if (first.ok) return { ok: true, status: 'pushed', stderr: '', fallback_used: false };
+
+  const fallbackRemote = githubSsh443Remote(remoteUrl);
+  if (!fallbackRemote) {
+    return { ok: false, status: 'failed', stderr: first.stderr || first.error, fallback_used: false };
+  }
+
+  const fallback = git(['push', fallbackRemote, `HEAD:${branch}`], {
+    env: {
+      ...process.env,
+      GIT_SSH_COMMAND: 'ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30',
+    },
+  });
+  events.push({ type: 'push_fallback', remote: fallbackRemote, branch, status: fallback.status, ok: fallback.ok });
+  return {
+    ok: fallback.ok,
+    status: fallback.ok ? 'pushed' : 'failed',
+    stderr: fallback.stderr || fallback.error || first.stderr || first.error,
+    fallback_used: fallback.ok,
+  };
+}
+
+function fetchAndCompare(branch, events) {
+  const fetch = git(['fetch', 'origin', branch]);
+  events.push({ type: 'fetch', remote: 'origin', branch, status: fetch.status, ok: fetch.ok });
+  const head = gitText(['rev-parse', 'HEAD']);
+  const originHead = gitText(['rev-parse', `origin/${branch}`]);
+  return {
+    ok: Boolean(head && originHead && head === originHead),
+    head,
+    originHead,
+    status: head && originHead && head === originHead ? 'matched' : 'mismatch',
+    fetchOk: fetch.ok,
+    fetchError: fetch.stderr || fetch.error,
+  };
+}
+
+function unpushedCount(branch) {
+  const result = git(['rev-list', '--count', `origin/${branch}..HEAD`]);
+  if (!result.ok) return 0;
+  return Number(result.stdout.trim() || '0');
+}
+
+function updateProjectState(sync) {
+  if (isTracked(paths.state)) return;
+  const state = readJson(paths.state, {});
+  state.repository_sync = {
+    status: sync.status,
+    branch: sync.branch,
+    head: sync.head,
+    origin_head: sync.origin_head,
+    dirty: sync.dirty,
+    staged_files: sync.staged_files,
+    untracked_files: sync.untracked_files,
+    unpushed_commits: sync.unpushed_commits,
+    last_commit_status: sync.last_commit_status,
+    last_push_status: sync.last_push_status,
+    last_remote_check: sync.last_remote_check,
+    last_ci_status: sync.last_ci_status,
+    checked_at: sync.checked_at,
+    blockers: sync.blockers,
+    warnings: sync.warnings,
+    report: sync.report,
+  };
+  state.artifacts = {
+    ...(state.artifacts || {}),
+    repository_sync_report: sync.report,
+    repository_sync_json: '.gstack/repository-sync.json',
+    repository_sync_runner: '.gstack/harness/bin/gstack-harness-sync-repository',
+  };
+  writeJson(paths.state, state);
+}
+
+function writeReport(sync) {
+  const report = `# Repository Sync Report
+
+Generated: ${sync.checked_at}
+Status: ${sync.status}
+Branch: ${sync.branch || 'unknown'}
+HEAD: ${sync.head || 'unknown'}
+Origin HEAD: ${sync.origin_head || 'unknown'}
+Dirty: ${sync.dirty}
+Unpushed commits: ${sync.unpushed_commits}
+Last commit status: ${sync.last_commit_status}
+Last push status: ${sync.last_push_status}
+Last remote check: ${sync.last_remote_check}
+
+## Blockers
+
+${sync.blockers.length ? sync.blockers.map((item) => `- ${item}`).join('\n') : 'None'}
+
+## Warnings
+
+${sync.warnings.length ? sync.warnings.map((item) => `- ${item}`).join('\n') : 'None'}
+`;
+  fs.mkdirSync(path.dirname(paths.report), { recursive: true });
+  fs.writeFileSync(paths.report, report, 'utf8');
+}
+
+function finish(sync, exitCode = 0) {
+  if (!dryRun) {
+    ensureLocalStateExcludes();
+    writeJson(paths.json, sync);
+    updateProjectState(sync);
+    writeReport(sync);
+  }
+  if (printJson) {
+    process.stdout.write(`${JSON.stringify(sync, null, 2)}\n`);
+  } else {
+    process.stdout.write(`repository sync: ${sync.status}\n`);
+    if (sync.blockers.length) process.stdout.write(`blockers: ${sync.blockers.join(', ')}\n`);
+    if (sync.warnings.length) process.stdout.write(`warnings: ${sync.warnings.join(', ')}\n`);
+  }
+  process.exit(exitCode);
+}
+
+const sync = currentStateBase();
+const inside = git(['rev-parse', '--is-inside-work-tree']);
+if (!inside.ok) {
+  sync.status = 'blocked';
+  sync.blockers.push('not_git_repo');
+  finish(sync, 1);
+}
+
+sync.branch = gitText(['branch', '--show-current']);
+sync.head = gitText(['rev-parse', 'HEAD']);
+if (!sync.branch) {
+  sync.status = 'blocked';
+  sync.blockers.push('detached_head');
+  finish(sync, 1);
+}
+if (!sync.head) {
+  sync.status = 'blocked';
+  sync.blockers.push('missing_head');
+  finish(sync, 1);
+}
+
+const remoteUrl = gitText(['config', '--get', 'remote.origin.url']);
+const changes = changedFiles();
+sync.changed_files = changes.map((entry) => entry.path).sort();
+sync.staged_files = gitText(['diff', '--cached', '--name-only']).split(/\r?\n/).filter(Boolean).sort();
+sync.untracked_files = changes.filter((entry) => entry.code === '??').map((entry) => entry.path).sort();
+sync.dirty = changes.length > 0;
+
+if (!remoteUrl && !noPush) {
+  sync.status = 'local_only';
+  sync.last_push_status = 'missing_remote';
+  sync.last_remote_check = 'missing_remote';
+  sync.blockers.push('no_remote_repository');
+  finish(sync, 1);
+}
+
+if (dryRun) {
+  sync.status = sync.dirty ? 'would_sync' : 'no_changes';
+  finish(sync, 0);
+}
+
+if (sync.dirty) {
+  const atomic = atomicPath();
+  if (!atomic) {
+    sync.status = 'blocked';
+    sync.blockers.push('missing_atomic_commit_runner');
+    finish(sync, 1);
+  }
+  const args = ['--target', target, '--json'];
+  if (scriptOnly) args.push('--script-only');
+  const result = run(atomic, args);
+  const atomicSummary = commitSummaryFromAtomic(result.stdout);
+  sync.events.push({ type: 'atomic_commit', status: result.status, ok: result.ok });
+  if (atomicSummary?.excluded_files) sync.excluded_files = atomicSummary.excluded_files;
+  if (!result.ok) {
+    sync.status = 'blocked';
+    sync.last_commit_status = 'failed';
+    sync.blockers.push(atomicSummary?.stop_reason || 'atomic_commit_failed');
+    finish(sync, 1);
+  }
+  sync.last_commit_status = atomicSummary?.commits?.length ? 'committed' : 'none';
+  sync.head = gitText(['rev-parse', 'HEAD']) || sync.head;
+}
+
+if (noPush) {
+  sync.status = sync.dirty ? 'local_only' : 'no_changes';
+  sync.last_push_status = 'skipped';
+  sync.last_remote_check = 'skipped';
+  sync.warnings.push('push_skipped_by_no_push');
+  finish(sync, 0);
+}
+
+const compareBefore = fetchAndCompare(sync.branch, sync.events);
+sync.head = compareBefore.head || sync.head;
+sync.origin_head = compareBefore.originHead || '';
+sync.last_remote_check = compareBefore.status;
+sync.unpushed_commits = unpushedCount(sync.branch);
+
+if (!sync.dirty && compareBefore.ok && sync.unpushed_commits === 0) {
+  sync.status = 'no_changes';
+  sync.last_push_status = 'none';
+  finish(sync, 0);
+}
+
+if (sync.unpushed_commits > 0 || sync.dirty || !compareBefore.ok) {
+  if (!remoteUrl) {
+    sync.status = 'local_only';
+    sync.last_push_status = 'missing_remote';
+    sync.blockers.push('no_remote_repository');
+    finish(sync, 1);
+  }
+  const push = pushCurrent(sync.branch, remoteUrl, sync.events);
+  sync.last_push_status = push.status;
+  if (push.fallback_used) sync.warnings.push('github_ssh_443_fallback_used');
+  if (!push.ok) {
+    sync.status = 'push_failed';
+    sync.blockers.push('push_failed');
+    sync.warnings.push(push.stderr.trim().split(/\r?\n/)[0] || 'push_failed');
+    finish(sync, 1);
+  }
+}
+
+const compareAfter = fetchAndCompare(sync.branch, sync.events);
+sync.head = compareAfter.head || sync.head;
+sync.origin_head = compareAfter.originHead || sync.origin_head;
+sync.last_remote_check = compareAfter.status;
+sync.unpushed_commits = unpushedCount(sync.branch);
+if (compareAfter.ok && sync.unpushed_commits === 0) {
+  sync.status = 'synced';
+  sync.last_push_status = sync.last_push_status === 'none' ? 'none' : sync.last_push_status;
+  finish(sync, 0);
+}
+
+sync.status = 'push_failed';
+sync.blockers.push(compareAfter.fetchOk ? 'remote_head_mismatch' : 'remote_fetch_failed');
+if (compareAfter.fetchError) sync.warnings.push(compareAfter.fetchError.trim().split(/\r?\n/)[0]);
+finish(sync, 1);
+NODE
