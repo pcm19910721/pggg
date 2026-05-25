@@ -6,17 +6,21 @@ usage() {
 gstack-harness-atomic-commit - create gated atomic commits for harness work
 
 Usage:
-  gstack-harness-atomic-commit [--target DIR] [--dry-run] [--no-commit] [--json]
+  gstack-harness-atomic-commit [--target DIR] [--dry-run] [--no-commit] [--script-only] [--push] [--json]
 
 Default behavior stages one atomic group at a time, runs the staged commit gate,
 commits passing groups, and refreshes the code-context baseline when available.
 Use --dry-run to preview grouping without staging or committing.
+Use --script-only to commit only reusable script/code paths and report excluded files.
+Use --push to push successful commits to origin on the current branch.
 EOF
 }
 
 TARGET="."
 DRY_RUN=0
 NO_COMMIT=0
+SCRIPT_ONLY=0
+PUSH=0
 PRINT_JSON=0
 
 while [ "$#" -gt 0 ]; do
@@ -31,6 +35,14 @@ while [ "$#" -gt 0 ]; do
       ;;
     --no-commit)
       NO_COMMIT=1
+      shift
+      ;;
+    --script-only)
+      SCRIPT_ONLY=1
+      shift
+      ;;
+    --push)
+      PUSH=1
       shift
       ;;
     --json)
@@ -61,7 +73,12 @@ fi
 
 TARGET_DIR="$(cd "$TARGET" && pwd)"
 
-TARGET_DIR="$TARGET_DIR" DRY_RUN="$DRY_RUN" NO_COMMIT="$NO_COMMIT" PRINT_JSON="$PRINT_JSON" node <<'NODE'
+if [ "$PUSH" = "1" ] && [ "$NO_COMMIT" = "1" ]; then
+  echo "ERROR: --push cannot be used with --no-commit" >&2
+  exit 2
+fi
+
+TARGET_DIR="$TARGET_DIR" DRY_RUN="$DRY_RUN" NO_COMMIT="$NO_COMMIT" SCRIPT_ONLY="$SCRIPT_ONLY" PUSH="$PUSH" PRINT_JSON="$PRINT_JSON" node <<'NODE'
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
@@ -69,6 +86,8 @@ const { spawnSync } = require('child_process');
 const target = process.env.TARGET_DIR;
 const dryRun = process.env.DRY_RUN === '1';
 const noCommit = process.env.NO_COMMIT === '1';
+const scriptOnly = process.env.SCRIPT_ONLY === '1';
+const pushEnabled = process.env.PUSH === '1';
 const printJson = process.env.PRINT_JSON === '1';
 
 function run(bin, args, opts = {}) {
@@ -153,26 +172,45 @@ const messages = {
   mixed: 'chore: update workspace changes',
 };
 
-function buildGroups(entries) {
+function isHarnessGeneratedPath(filePath) {
+  return filePath.startsWith('.ai-context/')
+    || filePath.startsWith('.gitnexus/')
+    || filePath === '.gstack/workspace-hygiene.json'
+    || filePath === '.gstack/workspace-hygiene-baseline.json'
+    || filePath === 'docs/WORKSPACE_HYGIENE_REPORT.md'
+    || filePath === 'docs/agents/workspace-hygiene.json';
+}
+
+function isScriptOnlyAllowedPath(filePath) {
+  return filePath.startsWith('bin/')
+    || filePath.startsWith('scripts/')
+    || (filePath.startsWith('tests/') && /\.(mjs|js|cjs|sh|bash|ps1|cmd)$/i.test(filePath));
+}
+
+function buildGroups(entries, options = {}) {
   const groups = new Map();
+  const excludedFiles = [];
   for (const entry of entries) {
-    if (entry.path.startsWith('.ai-context/')
-      || entry.path.startsWith('.gitnexus/')
-      || entry.path === '.gstack/workspace-hygiene.json'
-      || entry.path === '.gstack/workspace-hygiene-baseline.json'
-      || entry.path === 'docs/WORKSPACE_HYGIENE_REPORT.md'
-      || entry.path === 'docs/agents/workspace-hygiene.json') continue;
+    if (isHarnessGeneratedPath(entry.path)) continue;
+    if (options.scriptOnly && !isScriptOnlyAllowedPath(entry.path)) {
+      excludedFiles.push({ path: entry.path, reason: 'outside_script_only_allowlist' });
+      continue;
+    }
     const id = groupFor(entry.path);
     if (!groups.has(id)) groups.set(id, []);
     groups.get(id).push(entry.path);
   }
-  return groupOrder
+  const grouped = groupOrder
     .filter((id) => groups.has(id))
     .map((id) => ({
       id,
       message: messages[id],
       files: Array.from(new Set(groups.get(id))).sort(),
     }));
+  return {
+    groups: grouped,
+    excludedFiles: excludedFiles.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
+  };
 }
 
 function bridgePath() {
@@ -308,18 +346,43 @@ function commitGroup(group) {
   return result;
 }
 
+function currentBranch() {
+  const result = run('git', ['branch', '--show-current']);
+  if (!result.ok) fail(result.stderr || 'ERROR: unable to determine current branch', 2);
+  const branch = result.stdout.trim();
+  if (!branch) fail('ERROR: --push requires a named current branch', 2);
+  return branch;
+}
+
+function pushCommits() {
+  const branch = currentBranch();
+  const result = run('git', ['push', 'origin', `HEAD:${branch}`]);
+  return {
+    remote: 'origin',
+    branch,
+    status: result.ok ? 'pushed' : 'failed',
+    exit_code: result.status,
+    stderr: result.stderr,
+  };
+}
+
 ensureGitRepo();
 
-const groups = buildGroups(changedFiles());
+const classified = buildGroups(changedFiles(), { scriptOnly });
+const groups = classified.groups;
 const summary = {
   schema: 'gstack-harness.atomic_commit.v1',
   target,
   dry_run: dryRun,
   no_commit: noCommit,
+  script_only: scriptOnly,
+  push_enabled: pushEnabled,
   groups,
+  excluded_files: classified.excludedFiles,
   commits: [],
   stopped: false,
   events: [],
+  push: pushEnabled ? { status: 'pending', remote: 'origin' } : null,
 };
 
 if (groups.length === 0) {
@@ -336,6 +399,10 @@ if (dryRun) {
     for (const group of groups) {
       process.stdout.write(`- ${group.message}\n`);
       for (const file of group.files) process.stdout.write(`  ${file}\n`);
+    }
+    if (summary.excluded_files.length > 0) {
+      process.stdout.write('Excluded files:\n');
+      for (const file of summary.excluded_files) process.stdout.write(`  ${file.path} (${file.reason})\n`);
     }
   }
   process.exit(0);
@@ -388,11 +455,30 @@ for (const group of groups) {
 unstageAll();
 refreshBaseline('after', summary.events);
 
+if (pushEnabled) {
+  if (summary.commits.length === 0) {
+    summary.push = { status: 'skipped', remote: 'origin', reason: 'no_commits' };
+  } else {
+    summary.push = pushCommits();
+    if (summary.push.status !== 'pushed') {
+      if (printJson) process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+      fail(summary.push.stderr || `Atomic commit stopped: git push failed for ${summary.push.remote}`, 1);
+    }
+  }
+}
+
 if (printJson) {
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
 } else {
   for (const commit of summary.commits) {
     process.stdout.write(`${commit.status}: ${commit.message}\n`);
+  }
+  if (summary.excluded_files.length > 0) {
+    process.stdout.write('Excluded files:\n');
+    for (const file of summary.excluded_files) process.stdout.write(`  ${file.path} (${file.reason})\n`);
+  }
+  if (summary.push?.status === 'pushed') {
+    process.stdout.write(`pushed: ${summary.push.remote}/${summary.push.branch}\n`);
   }
 }
 NODE
