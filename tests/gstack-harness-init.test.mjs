@@ -250,11 +250,74 @@ test('init renders repeat work promotion state into installed targets', () => {
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-init')), true);
   assert.equal(fs.statSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-init')).mode & 0o111, 0o111);
   assert.match(fs.readFileSync(path.join(target, '.gstack', 'harness', 'agents', 'TEAM.md'), 'utf8'), /Workspace Hygiene Agent/);
-  assert.equal(stateJson.workspace_hygiene.status, 'unknown');
+  assert.notEqual(stateJson.workspace_hygiene.status, 'unknown');
   assert.equal(stateJson.workspace_hygiene.policy.auto_delete_files, false);
   assert.equal(stateJson.artifacts.workspace_hygiene_report, 'docs/WORKSPACE_HYGIENE_REPORT.md');
   assert.match(result.stdout, /Install summary/);
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'remediation-last.out')), false);
+});
+
+test('init automatically runs repository state and workspace hygiene preflight before readiness handoff', () => {
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-init-auto-preflight-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-init-home-'));
+  installFakeGstackHome(home);
+  spawnSync('git', ['init'], { cwd: target, encoding: 'utf8' });
+  spawnSync('git', ['config', 'user.email', 'auto-preflight@example.test'], { cwd: target, encoding: 'utf8' });
+  spawnSync('git', ['config', 'user.name', 'Auto Preflight Test'], { cwd: target, encoding: 'utf8' });
+  fs.writeFileSync(path.join(target, 'README.md'), '# Auto preflight\n');
+  spawnSync('git', ['add', 'README.md'], { cwd: target, encoding: 'utf8' });
+  spawnSync('git', ['commit', '-m', 'initial'], { cwd: target, encoding: 'utf8' });
+
+  const result = spawnSync(initBin, [
+    '--target', target,
+    '--project-id', 'gstack-init-ready',
+    '--mode', 'docs-only',
+    '--no-start-codex',
+  ], {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: 100_000,
+    env: {
+      ...process.env,
+      HOME: home,
+      PATH: `${home}/bin:${testPath}`,
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  for (const rel of [
+    '.gstack/repository-state.json',
+    'docs/REPOSITORY_STATE_REPORT.md',
+    'docs/agents/repository-state.json',
+    '.gstack/workspace-hygiene.json',
+    'docs/WORKSPACE_HYGIENE_REPORT.md',
+    'docs/agents/workspace-hygiene.json',
+    '.gstack/readiness-last.json',
+    'docs/FOUNDATION_READINESS_REPORT.md',
+  ]) {
+    assert.equal(fs.existsSync(path.join(target, rel)), true, `${rel} was not generated automatically`);
+  }
+
+  const state = JSON.parse(fs.readFileSync(path.join(target, '.gstack', 'project-state.json'), 'utf8'));
+  assert.equal(state.repository_state.git, 'ready');
+  assert.equal(state.repository_state.branch, 'master');
+  assert.equal(state.workspace_hygiene.report, 'docs/WORKSPACE_HYGIENE_REPORT.md');
+  assert.notEqual(state.workspace_hygiene.status, 'unknown');
+
+  const readiness = JSON.parse(fs.readFileSync(path.join(target, '.gstack', 'readiness-last.json'), 'utf8'));
+  assert.equal(readiness.repository_state.git, 'ready');
+  assert.notEqual(readiness.workspace_hygiene.status, 'unknown');
+
+  const installLog = fs.readFileSync(path.join(target, '.gstack', 'install-log.txt'), 'utf8');
+  assert.match(installLog, /auto preflight repository state:/);
+  assert.match(installLog, /auto preflight workspace hygiene:/);
+
+  const gitignore = fs.readFileSync(path.join(target, '.gitignore'), 'utf8');
+  assert.match(gitignore, /^\.gstack\/\*-last\.\*$/m);
+  assert.match(gitignore, /^\.gstack\/repository-state\.json$/m);
+  assert.match(gitignore, /^\.gstack\/workspace-hygiene\.json$/m);
+  assert.match(gitignore, /^docs\/agents\/\*\.json$/m);
 });
 
 test('init preserves existing repeat work promotion state on reinstall', () => {

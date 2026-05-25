@@ -19,7 +19,7 @@ cd /path/to/target-project
 /path/to/pggg/bin/pggg
 ```
 
-公开协作时，`bin/` 是脚本源；目标项目里的 `.gstack/harness/bin/` 和 `.gstack/harness/agents/` 是安装产物。不要提交 `.gitnexus/`、`PROJECT_STATE.md`、`.gstack/project-state.json`、`.gstack/usage-runs/*.json`、`.ai-context/gitnexus-*`、`.ai-context/gbrain-fallback/` 或真实 usage report。
+安装完成后，`pggg` 会自动跑 Repository State、Workspace Hygiene 和 Foundation Readiness preflight；用户不需要记这些命令。公开协作时，`bin/` 是脚本源；目标项目里的 `.gstack/harness/bin/` 和 `.gstack/harness/agents/` 是安装产物。不要提交 `.gitnexus/`、`PROJECT_STATE.md`、`.gstack/project-state.json`、`.gstack/*-last.*`、`.gstack/repository-state.json`、`.gstack/workspace-hygiene.json`、`.gstack/usage-runs/*.json`、`.ai-context/gitnexus-*`、`.ai-context/gbrain-fallback/` 或真实 usage report。
 
 `pggg` 是主入口；`pcm-harness` 暂时保留为兼容别名。
 
@@ -112,11 +112,17 @@ docs/SYSTEM_TUNING_REPORT.md
 PROJECT_STATE.md
 .gstack/project-state.json
 .gstack/readiness-last.json
+.gstack/*-last.*
+.gstack/repository-state.json
+.gstack/workspace-hygiene.json
+.gstack/workspace-hygiene-baseline.json
 .ai-context/gitnexus-status.json
 .ai-context/gitnexus-index.json
 .ai-context/gitnexus-index.md
 docs/CODE_CONTEXT_REPORT.md
 docs/FOUNDATION_READINESS_REPORT.md
+docs/REPOSITORY_STATE_REPORT.md
+docs/WORKSPACE_HYGIENE_REPORT.md
 docs/AGENTS_STATUS.md
 docs/agents/*.json
 ```

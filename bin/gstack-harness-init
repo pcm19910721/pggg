@@ -546,6 +546,24 @@ if git -C "$TARGET_DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
   GIT_REMOTE_URL="$(git -C "$TARGET_DIR" config --get remote.origin.url 2>/dev/null || true)"
 fi
 ensure_gitignore_entry ".gstack/backups/"
+ensure_gitignore_entry ".gstack/*-last.*"
+ensure_gitignore_entry ".gstack/project-state.json"
+ensure_gitignore_entry ".gstack/repository-state.json"
+ensure_gitignore_entry ".gstack/workspace-hygiene.json"
+ensure_gitignore_entry ".gstack/workspace-hygiene-baseline.json"
+ensure_gitignore_entry ".gstack/usage-runs/*.json"
+ensure_gitignore_entry ".gstack/usage-runs/index.jsonl"
+ensure_gitignore_entry ".ai-context/runs/"
+ensure_gitignore_entry ".ai-context/gbrain-fallback/"
+ensure_gitignore_entry ".ai-context/gitnexus-*"
+ensure_gitignore_entry ".gitnexus/"
+ensure_gitignore_entry "PROJECT_STATE.md"
+ensure_gitignore_entry "docs/AGENTS_STATUS.md"
+ensure_gitignore_entry "docs/CODE_CONTEXT_REPORT.md"
+ensure_gitignore_entry "docs/FOUNDATION_READINESS_REPORT.md"
+ensure_gitignore_entry "docs/REPOSITORY_STATE_REPORT.md"
+ensure_gitignore_entry "docs/WORKSPACE_HYGIENE_REPORT.md"
+ensure_gitignore_entry "docs/agents/*.json"
 
 GITHUB_CLI_STATUS="missing"
 GITHUB_CLI_AUTH="unknown"
@@ -2188,6 +2206,31 @@ if [ "$DRY_RUN" -ne 1 ] && [ "$GBRAIN_STATUS" = "ready" ] && [ "$REPOSITORY_STAT
   else
     log "warning: initial gbrain project memory sync skipped or timed out"
   fi
+fi
+
+if [ "$DRY_RUN" -ne 1 ]; then
+  if [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-repository-state" ]; then
+    if timeout 45s "$TARGET_DIR/.gstack/harness/bin/gstack-harness-repository-state" --target "$TARGET_DIR" --json > "$TARGET_DIR/.gstack/repository-state-last.json" 2> "$TARGET_DIR/.gstack/repository-state-last.err"; then
+      log "auto preflight repository state: completed"
+    else
+      log "auto preflight repository state: failed_or_timed_out"
+    fi
+  else
+    log "auto preflight repository state: runner_missing"
+  fi
+
+  if [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-workspace-hygiene" ]; then
+    if timeout 45s "$TARGET_DIR/.gstack/harness/bin/gstack-harness-workspace-hygiene" scan --target "$TARGET_DIR" --json > "$TARGET_DIR/.gstack/workspace-hygiene-last.json" 2> "$TARGET_DIR/.gstack/workspace-hygiene-last.err"; then
+      log "auto preflight workspace hygiene: completed"
+    else
+      log "auto preflight workspace hygiene: failed_or_timed_out"
+    fi
+  else
+    log "auto preflight workspace hygiene: runner_missing"
+  fi
+else
+  log "DRY_RUN auto preflight repository state"
+  log "DRY_RUN auto preflight workspace hygiene"
 fi
 
 if [ "$DRY_RUN" -ne 1 ] && [ -x "$TARGET_DIR/.gstack/harness/bin/gstack-harness-readiness" ]; then

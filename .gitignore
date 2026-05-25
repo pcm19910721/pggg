@@ -22,6 +22,8 @@ Thumbs.db
 .gstack/readiness-last.json
 .gstack/remediation-last.out
 .gstack/harness-evaluation.json
+.gstack/repository-state.json
+.gstack/repository-sync.json
 .gstack/workspace-hygiene.json
 .gstack/workspace-hygiene-baseline.json
 .gstack/*-last.*
@@ -36,6 +38,8 @@ docs/AGENTS_STATUS.md
 docs/CODE_CONTEXT_REPORT.md
 docs/FOUNDATION_READINESS_REPORT.md
 docs/HARNESS_EVALUATION_REPORT.md
+docs/REPOSITORY_STATE_REPORT.md
+docs/REPOSITORY_SYNC_REPORT.md
 docs/WORKSPACE_HYGIENE_REPORT.md
 docs/agents/*.json
 docs/USAGE_FEEDBACK_REPORT.md
