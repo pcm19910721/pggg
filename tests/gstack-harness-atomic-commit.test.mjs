@@ -248,3 +248,56 @@ test('atomic commit allows known groups when GitNexus reports no indexed changes
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.equal(commitCount(project), before + 1);
 });
+
+test('script-only dry-run includes script files and reports excluded files', () => {
+  const project = tempGitProject('gstack-atomic-commit-script-only-');
+  fs.mkdirSync(path.join(project, 'bin'), { recursive: true });
+  fs.mkdirSync(path.join(project, 'scripts'), { recursive: true });
+  fs.mkdirSync(path.join(project, 'docs'), { recursive: true });
+  fs.writeFileSync(path.join(project, 'bin', 'runner'), '#!/usr/bin/env bash\n');
+  fs.writeFileSync(path.join(project, 'scripts', 'runner.mjs'), 'console.log("run");\n');
+  fs.writeFileSync(path.join(project, 'docs', 'plan.md'), '# plan\n');
+  fs.writeFileSync(path.join(project, 'WORKFLOW_RECIPES.md'), '# recipes\n');
+  fs.writeFileSync(path.join(project, 'notes.txt'), 'local note\n');
+
+  const result = runAtomic(project, ['--script-only', '--dry-run', '--json']);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const summary = JSON.parse(result.stdout);
+  assert.deepEqual(summary.groups.map((group) => group.id), ['harness']);
+  assert.deepEqual(summary.groups[0].files, ['bin/runner', 'scripts/runner.mjs']);
+  assert.equal(summary.script_only, true);
+  assert.deepEqual(summary.excluded_files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)), [
+    { path: 'WORKFLOW_RECIPES.md', reason: 'outside_script_only_allowlist' },
+    { path: 'docs/plan.md', reason: 'outside_script_only_allowlist' },
+    { path: 'notes.txt', reason: 'outside_script_only_allowlist' },
+  ]);
+  assert.equal(commitCount(project), 1);
+});
+
+test('script-only push commits allowed scripts to origin current branch only', () => {
+  const project = tempGitProject('gstack-atomic-commit-script-push-');
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-atomic-remote-'));
+  spawnSync('git', ['init', '--bare'], { cwd: remote, encoding: 'utf8' });
+  spawnSync('git', ['remote', 'add', 'origin', remote], { cwd: project, encoding: 'utf8' });
+  spawnSync('git', ['push', '-u', 'origin', 'HEAD'], { cwd: project, encoding: 'utf8' });
+  fs.mkdirSync(path.join(project, 'bin'), { recursive: true });
+  fs.mkdirSync(path.join(project, 'docs'), { recursive: true });
+  fs.writeFileSync(path.join(project, 'bin', 'market-runner'), '#!/usr/bin/env bash\n');
+  fs.writeFileSync(path.join(project, 'docs', 'local-discussion.md'), '# local\n');
+  const before = commitCount(project);
+
+  const result = runAtomic(project, ['--script-only', '--push', '--json']);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const summary = JSON.parse(result.stdout);
+  assert.equal(commitCount(project), before + 1);
+  assert.equal(summary.push.status, 'pushed');
+  assert.equal(summary.push.remote, 'origin');
+  const remoteFiles = spawnSync('git', ['--git-dir', remote, 'ls-tree', '-r', '--name-only', 'HEAD'], {
+    encoding: 'utf8',
+  }).stdout.split(/\r?\n/).filter(Boolean);
+  assert.equal(remoteFiles.includes('bin/market-runner'), true);
+  assert.equal(remoteFiles.includes('docs/local-discussion.md'), false);
+  assert.equal(fs.existsSync(path.join(project, 'docs', 'local-discussion.md')), true);
+});
