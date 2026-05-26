@@ -585,6 +585,14 @@ test('init writes install governance preflight, ownership manifest, and concise 
   assert.match(projectState, /Harness-managed:/);
   assert.match(projectState, /Runtime-generated:/);
   assert.match(projectState, /Do-not-commit candidates:/);
+
+  const gitignore = fs.readFileSync(path.join(target, '.gitignore'), 'utf8');
+  assert.match(gitignore, /^\.gstack\/\*-last\.\*$/m);
+  assert.match(gitignore, /^\.gstack\/project-state\.json$/m);
+  assert.match(gitignore, /^docs\/agents\/\*\.json$/m);
+  assert.match(gitignore, /^app\/mima\.txt$/m);
+  assert.match(gitignore, /^server_materials\/10-access$/m);
+  assert.match(gitignore, /^server_materials\/10-access\/PCM\.pem$/m);
 });
 
 test('init keeps non-git repository baseline gate after readiness rerun', () => {

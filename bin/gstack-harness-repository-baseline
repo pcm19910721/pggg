@@ -173,6 +173,53 @@ function gitignoreSuggestions(sensitivePaths) {
   return Array.from(suggestions).sort();
 }
 
+function globToRegExp(pattern) {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\?/g, '[^/]');
+  return new RegExp(`^${escaped}$`);
+}
+
+function gitignorePatterns() {
+  const file = path.join(target, '.gitignore');
+  let text = '';
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    return [];
+  }
+  return text.split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'));
+}
+
+function matchesGitignorePattern(filePath, pattern) {
+  const negated = pattern.startsWith('!');
+  const raw = negated ? pattern.slice(1) : pattern;
+  const normalized = raw.replace(/^\/+/, '').replace(/\/+$/, '');
+  if (!normalized) return false;
+  if (raw.endsWith('/')) {
+    return filePath === normalized || filePath.startsWith(`${normalized}/`);
+  }
+  if (normalized.includes('*') || normalized.includes('?')) {
+    if (normalized.includes('/')) return globToRegExp(normalized).test(filePath);
+    return filePath.split('/').some((part) => globToRegExp(normalized).test(part));
+  }
+  if (normalized.includes('/')) {
+    return filePath === normalized || filePath.startsWith(`${normalized}/`);
+  }
+  return filePath.split('/').includes(normalized);
+}
+
+function isIgnoredByGitignore(filePath) {
+  let ignored = false;
+  for (const pattern of gitignorePatterns()) {
+    if (!matchesGitignorePattern(filePath, pattern)) continue;
+    ignored = !pattern.startsWith('!');
+  }
+  return ignored;
+}
+
 function updateMarkdownState(state) {
   const file = path.join(target, 'PROJECT_STATE.md');
   if (!fs.existsSync(file)) return;
@@ -334,6 +381,7 @@ const files = walk(target);
 const sensitivePaths = files
   .map((file) => ({ ...file, reason: sensitiveReason(file.path) }))
   .filter((file) => file.reason)
+  .filter((file) => !isIgnoredByGitignore(file.path))
   .map(({ path: filePath, reason, size_bytes }) => ({ path: filePath, reason, size_bytes }));
 
 const summary = {

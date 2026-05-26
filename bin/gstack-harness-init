@@ -241,9 +241,6 @@ backup_existing() {
 ensure_gitignore_entry() {
   local pattern="$1"
   local gitignore="$TARGET_DIR/.gitignore"
-  if [ "$GIT_STATUS" != "ready" ] && [ ! -f "$gitignore" ]; then
-    return 0
-  fi
   if [ "$DRY_RUN" -eq 1 ]; then
     log "DRY_RUN ensure .gitignore contains $pattern"
     return 0
@@ -630,6 +627,9 @@ process.stdout.write(JSON.stringify(findings));
 NODE
 )"
 SENSITIVE_CANDIDATES_JSON="$(printf '%s' "$SENSITIVE_PATHS_JSON" | node -e 'const fs=require("fs"); const items=JSON.parse(fs.readFileSync(0,"utf8")||"[]"); process.stdout.write(JSON.stringify(items.map((item)=>item.path).filter(Boolean)));')"
+while IFS= read -r sensitive_candidate; do
+  [ -n "$sensitive_candidate" ] && ensure_gitignore_entry "$sensitive_candidate"
+done < <(printf '%s' "$SENSITIVE_CANDIDATES_JSON" | node -e 'const fs=require("fs"); const items=JSON.parse(fs.readFileSync(0,"utf8")||"[]"); for (const item of items) console.log(item);')
 INSTALL_PREFLIGHT_JSON="$(cat <<EOF
 {
   "schema": "gstack-harness.install_preflight.v1",

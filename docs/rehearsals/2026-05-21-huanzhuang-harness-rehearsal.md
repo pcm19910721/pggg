@@ -481,3 +481,128 @@ Original bundle check:
 Updated conclusion:
 
 The full path now works: old non-git bundle -> sensitive path block -> sanitized copy -> explicit user confirmation -> git baseline -> GitNexus index -> ai-context baseline -> clean ready repository state. This is the standard long-term multi-agent intake path.
+
+## Install Preflight And Gitignore Boundary Rehearsal
+
+Follow-up date: 2026-05-26
+
+Source copy:
+
+- `/home/adminpcm/projects/huanzhuang/huanzhuang_clean_bundle`
+
+Isolated rehearsal copies:
+
+- `/home/adminpcm/projects/huanzhuang_pggg_install_rehearsal_20260526-112142`
+- `/home/adminpcm/projects/huanzhuang_pggg_install_rehearsal_fixed_20260526-113304`
+- `/home/adminpcm/projects/huanzhuang_pggg_install_rehearsal_baselinefixed_20260526-113618`
+
+Flow:
+
+1. Copy the clean bundle outside the parent `huanzhuang` Git repository.
+2. Run `/home/adminpcm/gstack-multiagent/bin/pggg --target <copy> --no-start-codex`.
+3. Inspect `.gstack/install-summary.json`, `.gstack/repository-state.json`, `.gstack/workspace-hygiene.json`, `.gstack/readiness-last.json`, and `.gitignore`.
+4. Run `.gstack/harness/bin/gstack-harness-repository-baseline --target . --json`.
+5. After confirming the ignore boundary, run `.gstack/harness/bin/gstack-harness-repository-baseline --target . --yes --json`.
+
+Install evidence:
+
+```text
+Install summary
+- Status: partial
+- Mode: app
+- Git: missing
+- Runtime: ready
+- Next: Foundation Remediation Agent
+```
+
+Automatic preflight evidence:
+
+- Repository State ran automatically and wrote `.gstack/repository-state.json`.
+- Workspace Hygiene ran automatically and wrote `.gstack/workspace-hygiene.json`.
+- Foundation Readiness ran automatically and wrote `.gstack/readiness-last.json`.
+- Runtime detection found the Python bundle and set the repository path to `needs_git_baseline`.
+
+Problem found:
+
+- Non-Git target installs generated local runtime files but did not create `.gitignore`.
+- That left `.gstack/*-last.*`, `.gstack/repository-state.json`, `.gstack/workspace-hygiene.json`, `docs/agents/*.json`, and sensitive bundle paths without an automatic ignore boundary.
+
+Fix verified:
+
+- `pggg` now writes `.gitignore` even when the target is not yet a Git repository.
+- Install preflight sensitive paths are added to `.gitignore`.
+
+Installed `.gitignore` evidence:
+
+```text
+.gstack/backups/
+.gstack/*-last.*
+.gstack/project-state.json
+.gstack/repository-state.json
+.gstack/workspace-hygiene.json
+.gstack/workspace-hygiene-baseline.json
+.gstack/usage-runs/*.json
+.gstack/usage-runs/index.jsonl
+.ai-context/runs/
+.ai-context/gbrain-fallback/
+.ai-context/gitnexus-*
+.gitnexus/
+PROJECT_STATE.md
+docs/AGENTS_STATUS.md
+docs/CODE_CONTEXT_REPORT.md
+docs/FOUNDATION_READINESS_REPORT.md
+docs/REPOSITORY_STATE_REPORT.md
+docs/WORKSPACE_HYGIENE_REPORT.md
+docs/agents/*.json
+app/mima.txt
+server_materials/10-access
+server_materials/10-access/PCM.pem
+```
+
+Second problem found:
+
+- Repository Baseline still treated files under an ignored sensitive directory as blocking sensitive paths.
+- Example: `server_materials/10-access/fuwuqi.txt` was blocked even though `server_materials/10-access` was already ignored.
+
+Fix verified:
+
+- Repository Baseline now filters sensitive findings through `.gitignore` coverage before blocking.
+- Ignored sensitive files do not enter the baseline commit and do not block initialization.
+
+Baseline precheck evidence after fix:
+
+```text
+status: requires_confirmation
+git.before: missing
+sensitive_paths: []
+```
+
+Confirmed baseline evidence:
+
+```text
+status: ready
+git.initialized: true
+git.branch: master
+git.head: 4721454d9a9bf90567f8bb9c32c3f6f265bb1882
+gitnexus.status: ready
+ai_context_baseline.status: ready
+```
+
+Git evidence:
+
+- Final `git status --short`: empty
+- `git ls-files` did not include `app/mima.txt`.
+- `git ls-files` did not include `server_materials/10-access/PCM.pem`.
+- `git ls-files` did not include `server_materials/10-access/fuwuqi.txt`.
+
+State evidence:
+
+- `repository.status: ready`
+- `repository.baseline_required: false`
+- `long_term_readiness.status: ready`
+- `quality_gates.code_context: ready`
+- `next_recommended_recipe: R0 Restore / Resume Context`
+
+Updated conclusion:
+
+Fresh installs no longer require users to remember repository-state, workspace-hygiene, readiness, or local runtime `.gitignore` commands. For old non-Git bundles, the install path is now: install -> automatic preflight -> automatic ignore boundary -> Repository Baseline precheck -> explicit confirmation -> clean Git baseline without sensitive ignored paths.

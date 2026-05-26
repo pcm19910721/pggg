@@ -162,3 +162,28 @@ test('repository baseline blocks when sensitive paths would enter initial commit
   assert.equal(summary.sensitive_paths.some((item) => item.path === '.env'), true);
   assert.equal(fs.existsSync(path.join(project, '.git')), false);
 });
+
+test('repository baseline allows sensitive paths already covered by gitignore', () => {
+  const project = nonGitProject('gstack-repository-baseline-ignored-sensitive-');
+  fs.mkdirSync(path.join(project, 'server_materials', '10-access'), { recursive: true });
+  fs.writeFileSync(path.join(project, 'server_materials', '10-access', 'PCM.pem'), 'fake private key\n');
+  fs.writeFileSync(path.join(project, 'server_materials', '10-access', 'fuwuqi.txt'), 'fake server access\n');
+  fs.writeFileSync(path.join(project, '.gitignore'), 'server_materials/10-access\n');
+
+  const result = runBaseline(project, ['--yes', '--json'], {
+    ...process.env,
+    PATH: testPath,
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const summary = JSON.parse(result.stdout);
+  assert.equal(summary.status, 'ready');
+  assert.equal(summary.sensitive_paths.length, 0);
+
+  const tracked = spawnSync('git', ['ls-files'], {
+    cwd: project,
+    encoding: 'utf8',
+  }).stdout;
+  assert.doesNotMatch(tracked, /server_materials\/10-access\/PCM\.pem/);
+  assert.doesNotMatch(tracked, /server_materials\/10-access\/fuwuqi\.txt/);
+});
