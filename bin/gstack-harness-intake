@@ -1,0 +1,352 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+gstack-harness-intake - simulate target project readiness for pggg takeover
+
+Usage:
+  gstack-harness-intake simulate [--target DIR] [--json]
+
+Commands:
+  simulate  Read target facts and write project intake evidence.
+
+This runner is safe by default. It does not initialize Git, stage files,
+commit, push, delete files, move files, or read secret contents.
+EOF
+}
+
+COMMAND="simulate"
+TARGET="."
+PRINT_JSON=0
+
+if [ "$#" -gt 0 ] && [ "${1#--}" = "$1" ]; then
+  COMMAND="$1"
+  shift
+fi
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    simulate)
+      COMMAND="simulate"
+      shift
+      ;;
+    --target)
+      TARGET="${2:-}"
+      shift 2
+      ;;
+    --json)
+      PRINT_JSON=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+case "$COMMAND" in
+  simulate) ;;
+  *)
+    echo "ERROR: command must be simulate" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+if [ -z "$TARGET" ]; then
+  echo "ERROR: --target requires a directory" >&2
+  exit 2
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "ERROR: node is required for project intake" >&2
+  exit 2
+fi
+
+TARGET_DIR="$(mkdir -p "$TARGET" && cd "$TARGET" && pwd)"
+
+TARGET_DIR="$TARGET_DIR" PRINT_JSON="$PRINT_JSON" node <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const { spawnSync } = require('child_process');
+
+const target = process.env.TARGET_DIR;
+const printJson = process.env.PRINT_JSON === '1';
+const now = new Date().toISOString();
+
+const paths = {
+  json: path.join(target, '.gstack', 'intake-last.json'),
+  report: path.join(target, 'docs', 'PROJECT_INTAKE_REPORT.md'),
+};
+
+function run(bin, args, opts = {}) {
+  const result = spawnSync(bin, args, {
+    cwd: opts.cwd || target,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  return {
+    ok: result.status === 0,
+    status: result.status,
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+    error: result.error ? String(result.error.message || result.error) : '',
+  };
+}
+
+function runGit(args) {
+  return run('git', args);
+}
+
+function gitText(args) {
+  const result = runGit(args);
+  return result.ok ? result.stdout.trim() : '';
+}
+
+function rel(file) {
+  return path.relative(target, file).split(path.sep).join('/');
+}
+
+function readMaybe(file) {
+  try {
+    return fs.readFileSync(file, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+function walk(dir, out = []) {
+  let entries = [];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    const relative = rel(full);
+    if (entry.isDirectory()) {
+      if (['.git', 'node_modules'].includes(entry.name)) continue;
+      if (relative.startsWith('.gstack/harness/')) continue;
+      walk(full, out);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    let stat;
+    try {
+      stat = fs.statSync(full);
+    } catch {
+      continue;
+    }
+    out.push({ path: relative, size_bytes: stat.size });
+  }
+  return out;
+}
+
+function sensitiveReason(filePath) {
+  const base = path.basename(filePath).toLowerCase();
+  if (filePath === '.env' || filePath.startsWith('.env.')) return 'environment secret file';
+  if (base === 'mima.txt') return 'password file name';
+  if (/\.(pem|key|p12|pfx)$/i.test(base)) return 'private key material';
+  if (filePath === 'server_materials/10-access' || filePath.startsWith('server_materials/10-access/')) {
+    return 'server access material';
+  }
+  if (/(^|[._-])(token|secret|password|passwd|apikey|api-key|credential|credentials)([._-]|$)/i.test(base)) {
+    return 'sensitive file name';
+  }
+  return '';
+}
+
+function detectRuntime() {
+  const candidates = ['', 'backend', 'frontend', 'app', 'api', 'server', 'web'];
+  for (const candidate of candidates) {
+    const dir = candidate ? path.join(target, candidate) : target;
+    if (!fs.existsSync(dir)) continue;
+    const prefix = candidate ? `cd ${candidate} && ` : '';
+    if (fs.existsSync(path.join(dir, 'package.json'))) {
+      return { status: 'ready', mode: 'app', kind: 'node', install: `${prefix}npm install`, test: `${prefix}npm test` };
+    }
+    if (fs.existsSync(path.join(dir, 'pyproject.toml'))) {
+      return { status: 'ready', mode: 'app', kind: 'python', install: `${prefix}pip install -e .`, test: `${prefix}pytest` };
+    }
+    if (fs.existsSync(path.join(dir, 'go.mod'))) {
+      return { status: 'ready', mode: 'app', kind: 'go', install: '', test: `${prefix}go test ./...` };
+    }
+    if (fs.existsSync(path.join(dir, 'Cargo.toml'))) {
+      return { status: 'ready', mode: 'app', kind: 'rust', install: '', test: `${prefix}cargo test` };
+    }
+    for (const entry of ['web_app.py', 'app.py', 'main.py']) {
+      if (fs.existsSync(path.join(dir, entry))) {
+        return {
+          status: 'ready',
+          mode: 'app',
+          kind: 'python-script',
+          install: 'not_required',
+          dev: `${prefix}python3 ${entry}`,
+          test: `${prefix}python3 -m py_compile *.py modules/*/service.py apps/server/*.py`,
+        };
+      }
+    }
+    if (fs.existsSync(path.join(dir, 'run_web.ps1')) || fs.existsSync(path.join(dir, 'run_web.bat'))) {
+      return { status: 'ready', mode: 'app', kind: 'script-bundle', install: 'not_required', test: '' };
+    }
+  }
+  return { status: 'not_required', mode: 'docs-only', kind: 'docs', install: 'not_required', test: 'not_required' };
+}
+
+function gitFacts() {
+  const rootResult = runGit(['rev-parse', '--show-toplevel']);
+  if (!rootResult.ok) {
+    return {
+      status: 'missing',
+      repo_root: '',
+      target_inside_repo: false,
+      target_is_repo_root: false,
+      branch: 'none',
+      head: '',
+      dirty: false,
+    };
+  }
+  const repoRoot = rootResult.stdout.trim();
+  const status = gitText(['status', '--short', '--untracked-files=all']);
+  return {
+    status: 'ready',
+    repo_root: repoRoot,
+    target_inside_repo: target === repoRoot || target.startsWith(`${repoRoot}${path.sep}`),
+    target_is_repo_root: target === repoRoot,
+    branch: gitText(['branch', '--show-current']) || 'unknown',
+    head: gitText(['rev-parse', 'HEAD']),
+    dirty: Boolean(status),
+  };
+}
+
+function remoteFacts() {
+  const url = gitText(['config', '--get', 'remote.origin.url']);
+  return url ? { status: 'ready', url } : { status: 'missing', url: '' };
+}
+
+function recommendedPrompt(summary) {
+  return `You are taking over this project through pggg.
+
+Do not modify business code, commit, or push yet.
+
+Read PROJECT_STATE.md, .gstack/project-state.json, .gstack/repository-state.json, .gstack/workspace-hygiene.json, .gstack/readiness-last.json, and docs/CODEX_START_PROMPT.md if present.
+
+First output only an intake report: readiness verdict, Git and remote state, whether Repository Baseline is required, runtime/test command detection, files that may enter Git, files that must remain ignored, sensitive path candidates by path only, and one recommended next step.
+
+If the target is not a Git repository, only run Repository Baseline precheck. Do not run repository-baseline --yes until I explicitly confirm.
+
+Current intake verdict: ${summary.status}. Recommended next step: ${summary.recommended_next_step}.`;
+}
+
+function renderReport(summary) {
+  const list = (items, formatter = (item) => `- ${item}`) => items.length ? items.map(formatter).join('\n') : 'None';
+  return `# Project Intake Report
+
+Generated: ${summary.generated_at}
+Target: ${summary.target}
+Status: ${summary.status}
+
+## Summary
+
+- Git: ${summary.git.status}
+- Remote: ${summary.remote.status}
+- Runtime: ${summary.runtime.status} (${summary.runtime.kind})
+- Repository Baseline required: ${summary.repository_baseline.required}
+- Next step: ${summary.recommended_next_step}
+
+## Sensitive Path Candidates
+
+${list(summary.sensitive_paths, (item) => `- ${item.path}: ${item.reason}`)}
+
+## Ignore Recommendations
+
+${list(summary.ignore_recommendations)}
+
+## Warnings
+
+${list(summary.warnings)}
+
+## Recommended Codex Prompt
+
+\`\`\`text
+${summary.recommended_codex_prompt}
+\`\`\`
+`;
+}
+
+const files = walk(target);
+const git = gitFacts();
+const runtime = detectRuntime();
+const remote = git.status === 'ready' ? remoteFacts() : { status: 'missing', url: '' };
+const sensitivePaths = files
+  .map((file) => ({ ...file, reason: sensitiveReason(file.path) }))
+  .filter((file) => file.reason)
+  .map(({ path: filePath, reason, size_bytes }) => ({ path: filePath, reason, size_bytes }));
+const existingGitignore = readMaybe(path.join(target, '.gitignore'));
+const warnings = [];
+if (git.status === 'ready' && !git.target_is_repo_root) warnings.push('git_repo_root_mismatch');
+if (git.status === 'ready' && remote.status === 'missing') warnings.push('remote_missing');
+if (sensitivePaths.length) warnings.push('sensitive_path_candidates');
+
+const baselineRequired = runtime.mode === 'app' && git.status !== 'ready';
+const status = baselineRequired ? 'needs_baseline' : 'ready';
+const summary = {
+  schema: 'gstack-harness.project_intake.v1',
+  command: 'simulate',
+  generated_at: now,
+  target,
+  status,
+  project_type: runtime.mode,
+  git,
+  remote,
+  runtime,
+  repository_baseline: {
+    required: baselineRequired,
+    precheck_command: '.gstack/harness/bin/gstack-harness-repository-baseline --target . --json',
+  },
+  sensitive_paths: sensitivePaths,
+  ignore_boundary: {
+    has_gitignore: Boolean(existingGitignore),
+  },
+  ignore_recommendations: [
+    '.gstack/intake/**',
+    '.gstack/*-last.*',
+    '.gstack/project-state.json',
+    '.gstack/repository-state.json',
+    '.gstack/workspace-hygiene.json',
+    '.gstack/repository-sync.json',
+    '.gstack/usage-runs/**',
+    '.ai-context/runs/**',
+    '.ai-context/gitnexus-*',
+    '.gitnexus/**',
+    'docs/agents/*.json',
+    'docs/PROJECT_INTAKE_REPORT.md',
+    ...sensitivePaths.map((item) => item.path),
+  ],
+  generated_files: [
+    '.gstack/intake-last.json',
+    'docs/PROJECT_INTAKE_REPORT.md',
+  ],
+  commit_policy: runtime.mode === 'docs-only' ? 'docs-only' : 'explicit_paths_only',
+  warnings,
+  blockers: [],
+  recommended_next_step: baselineRequired ? 'Repository Baseline precheck' : 'Codex intake report',
+};
+summary.recommended_codex_prompt = recommendedPrompt(summary);
+
+fs.mkdirSync(path.dirname(paths.json), { recursive: true });
+fs.writeFileSync(paths.json, `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
+fs.mkdirSync(path.dirname(paths.report), { recursive: true });
+fs.writeFileSync(paths.report, renderReport(summary), 'utf8');
+
+if (printJson) process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+else process.stdout.write(`Project intake simulate: ${summary.status}\nReport: docs/PROJECT_INTAKE_REPORT.md\n`);
+NODE

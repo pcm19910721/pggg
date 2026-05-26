@@ -255,6 +255,7 @@ test_fresh_install() {
     ".gstack/harness/bin/gstack-harness-schedule"
     ".gstack/harness/bin/gstack-harness-workspace-hygiene"
     ".gstack/harness/bin/gstack-harness-atomic-commit"
+    ".gstack/harness/bin/gstack-harness-intake"
     ".gstack/harness/bin/gstack-harness-repository-state"
     ".gstack/harness/bin/gstack-harness-repository-baseline"
     ".ai-context/project.json"
@@ -888,6 +889,7 @@ main() {
   bash -n "$SCRIPT_DIR/gstack-harness-schedule"
   bash -n "$SCRIPT_DIR/gstack-harness-workspace-hygiene"
   bash -n "$SCRIPT_DIR/gstack-harness-atomic-commit"
+  bash -n "$SCRIPT_DIR/gstack-harness-intake"
   bash -n "$SCRIPT_DIR/gstack-harness-repository-state"
   bash -n "$SCRIPT_DIR/gstack-harness-repository-baseline"
   node --check "$TEMPLATE_ROOT/scripts/ai-context-bridge.mjs" >/dev/null

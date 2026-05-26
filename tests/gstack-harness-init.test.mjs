@@ -247,7 +247,9 @@ test('init renders repeat work promotion state into installed targets', () => {
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-sync-repository')), true);
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-repository-state')), true);
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-repository-baseline')), true);
+  assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-intake')), true);
   assert.equal(fs.existsSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-init')), true);
+  assert.equal(fs.statSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-intake')).mode & 0o111, 0o111);
   assert.equal(fs.statSync(path.join(target, '.gstack', 'harness', 'bin', 'gstack-harness-init')).mode & 0o111, 0o111);
   assert.match(fs.readFileSync(path.join(target, '.gstack', 'harness', 'agents', 'TEAM.md'), 'utf8'), /Workspace Hygiene Agent/);
   assert.notEqual(stateJson.workspace_hygiene.status, 'unknown');
